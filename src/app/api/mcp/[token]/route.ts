@@ -1,0 +1,28 @@
+import { timingSafeEqual } from "node:crypto";
+import { createMcpHandler } from "mcp-handler";
+import { MCP_INSTRUCTIONS, registerTools } from "@/lib/mcp/server";
+
+// Remote MCP endpoint for the claude.ai connector. The secret token in the URL is the
+// credential (claude.ai custom connectors accept a plain URL), so treat the full URL as a password.
+
+export const dynamic = "force-dynamic";
+
+const handler = createMcpHandler(registerTools, {
+  serverInfo: { name: "BodyMetrics", version: "1.0.0" },
+  instructions: MCP_INSTRUCTIONS,
+});
+
+function tokenOk(token: string): boolean {
+  const expected = process.env.MCP_TOKEN;
+  if (!expected || expected.length < 24) return false;
+  const a = Buffer.from(token);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+async function handle(req: Request, { params }: { params: Promise<{ token: string }> }) {
+  if (!tokenOk((await params).token)) return new Response("Not found", { status: 404 });
+  return handler(req);
+}
+
+export { handle as GET, handle as POST, handle as DELETE };
