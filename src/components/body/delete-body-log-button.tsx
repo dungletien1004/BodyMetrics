@@ -2,7 +2,7 @@
 
 import { Loader2, Trash2 } from "lucide-react";
 import { useTransition } from "react";
-import { deleteBodyLog } from "@/app/body/actions";
+import { deleteBodyLog } from "@/app/(app)/body/actions";
 import { Button } from "@/components/ui";
 
 export function DeleteBodyLogButton({ id, hasPhotos }: { id: string; hasPhotos: boolean }) {

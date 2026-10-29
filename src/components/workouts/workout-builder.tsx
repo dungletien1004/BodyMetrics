@@ -2,7 +2,7 @@
 
 import { Copy, Plus, Search, Trash2, X } from "lucide-react";
 import { useMemo, useState, useTransition } from "react";
-import { saveWorkout, weightForDay } from "@/app/workouts/actions";
+import { saveWorkout, weightForDay } from "@/app/(app)/workouts/actions";
 import { Badge, Button, Card, CardTitle, Field, Input, Textarea, cn } from "@/components/ui";
 import { exerciseKcal, INTENSITY_LABEL, type Intensity } from "@/lib/calc";
 import { isDayKey } from "@/lib/dates";

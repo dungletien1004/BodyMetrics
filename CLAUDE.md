@@ -28,7 +28,14 @@ Personal weight-loss tracker: meals (with AI photo calorie analysis), gym/cardio
 - UI primitives in `src/components/ui.tsx` (Card, CardTitle, Button, LinkButton, Input, Select, Textarea, Field, Stat, Progress, EmptyState, Badge, PageHeader). Use theme colors (`bg-surface`, `text-muted`, `border-border`, `text-accent`, `text-intake`, `text-burn`, `bg-protein`/`bg-carb`/`bg-fat`). Mobile first: layout must work at 375px.
 - Navigation is in `src/components/nav.tsx` and already links every section.
 
+## Auth
+- Single account in the `User` table. On first login, `AUTH_USERNAME` / `AUTH_PASSWORD` create it if the table is empty; `npm run user:set -- <u> <p>` creates or resets it. Password change lives on `/profile`.
+- `src/middleware.ts` checks the signed `bm_session` cookie (HS256 with `AUTH_SECRET`) on every request except `/login`, `/api/mcp` and PWA assets: pages redirect to `/login`, API calls and server actions get 401.
+- App pages live in the `src/app/(app)/` route group; its layout calls `requireUser()`, which also rejects sessions issued before a password change (`User.sessionVer`).
+
 ## Section ownership (routes)
+All app routes below are under `src/app/(app)/`.
+
 | Route | Area |
 |---|---|
 | `/` | Dashboard (today) |

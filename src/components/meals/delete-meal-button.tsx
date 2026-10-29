@@ -2,7 +2,7 @@
 
 import { Loader2, Trash2 } from "lucide-react";
 import { useTransition } from "react";
-import { deleteMeal } from "@/app/meals/actions";
+import { deleteMeal } from "@/app/(app)/meals/actions";
 import { Button, cn } from "@/components/ui";
 
 export function DeleteMealButton({ id, redirectTo, compact }: { id: string; redirectTo?: string; compact?: boolean }) {

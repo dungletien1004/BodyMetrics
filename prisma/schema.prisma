@@ -11,6 +11,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Login account. Created from AUTH_USERNAME / AUTH_PASSWORD on first login, or with `npm run user:create`.
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String // scrypt, see src/lib/auth/password.ts
+  // Bumped on password change; sessions carrying an older value are rejected.
+  sessionVer   Int      @default(1)
+  createdAt    DateTime @default(now())
+}
+
 // Singleton row (id = 1).
 model Profile {
   id             Int      @id @default(1)

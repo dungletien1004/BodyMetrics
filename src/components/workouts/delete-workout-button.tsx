@@ -2,7 +2,7 @@
 
 import { Trash2 } from "lucide-react";
 import { useTransition } from "react";
-import { deleteWorkout } from "@/app/workouts/actions";
+import { deleteWorkout } from "@/app/(app)/workouts/actions";
 import { Button, cn } from "@/components/ui";
 
 export function DeleteWorkoutButton({

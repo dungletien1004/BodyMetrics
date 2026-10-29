@@ -1,8 +1,9 @@
 "use client";
 
-import { Activity, BarChart3, Dumbbell, Images, LayoutDashboard, Scale, User, Utensils } from "lucide-react";
+import { Activity, BarChart3, Dumbbell, Images, LayoutDashboard, LogOut, Scale, User, Utensils } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { logout } from "@/app/login/actions";
 import { cn } from "./ui";
 
 const LINKS = [
@@ -22,7 +23,7 @@ function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
-export function SideNav() {
+export function SideNav({ username }: { username: string }) {
   const pathname = usePathname();
   return (
     <nav className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col border-r border-border bg-surface px-3 py-5 md:flex">
@@ -44,6 +45,12 @@ export function SideNav() {
           </li>
         ))}
       </ul>
+      <form action={logout} className="mt-auto flex items-center justify-between gap-2 border-t border-border px-3 pt-4">
+        <span className="truncate text-sm text-muted">{username}</span>
+        <button type="submit" aria-label="Đăng xuất" title="Đăng xuất" className="rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-foreground">
+          <LogOut className="size-4" />
+        </button>
+      </form>
     </nav>
   );
 }
@@ -84,6 +91,11 @@ export function MobileTopBar() {
         <Link href="/profile" aria-label="Hồ sơ" className="rounded-lg p-2 text-muted hover:bg-surface-2">
           <User className="size-5" />
         </Link>
+        <form action={logout}>
+          <button type="submit" aria-label="Đăng xuất" className="rounded-lg p-2 text-muted hover:bg-surface-2">
+            <LogOut className="size-5" />
+          </button>
+        </form>
       </div>
     </header>
   );

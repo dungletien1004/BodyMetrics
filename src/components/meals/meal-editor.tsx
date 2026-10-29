@@ -4,7 +4,7 @@ import { Camera, ImagePlus, Loader2, Plus, Sparkles, Trash2, TriangleAlert } fro
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { analyzePhoto, createMeal, discardPhoto, updateMeal } from "@/app/meals/actions";
+import { analyzePhoto, createMeal, discardPhoto, updateMeal } from "@/app/(app)/meals/actions";
 import { Badge, Button, Card, CardTitle, cn, Field, Input, Textarea } from "@/components/ui";
 import { kcal as fmtKcal, num, parseNum } from "@/lib/format";
 import {

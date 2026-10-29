@@ -3,7 +3,9 @@ import { ageFrom, baselineTdee, bmi, bmr, proteinTarget, weeksToGoal } from "@/l
 import { todayKey } from "@/lib/dates";
 import { kcal, num } from "@/lib/format";
 import { getProfile, getWeightOn } from "@/lib/summary";
+import { requireUser } from "@/lib/auth";
 import { saveProfile } from "./actions";
+import { PasswordForm } from "./password-form";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +18,7 @@ const ACTIVITY = [
 
 export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {
   const { saved } = await searchParams;
-  const [p, weight] = await Promise.all([getProfile(), getWeightOn(todayKey())]);
+  const [p, weight, user] = await Promise.all([getProfile(), getWeightOn(todayKey()), requireUser()]);
   const rate = -p.dailyDeficit * 7 / 7700;
   const weeks = p.goalWeightKg ? weeksToGoal(weight, p.goalWeightKg, rate) : null;
 
@@ -82,6 +84,11 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
             unit="kg/tuần"
             sub={weeks ? `≈ ${weeks} tuần để đạt ${num(p.goalWeightKg)} kg` : undefined}
           />
+        </Card>
+
+        <Card className="lg:col-span-1">
+          <CardTitle>Tài khoản · {user.username}</CardTitle>
+          <PasswordForm />
         </Card>
       </div>
     </>

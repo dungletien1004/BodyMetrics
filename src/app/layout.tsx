@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Be_Vietnam_Pro } from "next/font/google";
-import { MobileNav, MobileTopBar, SideNav } from "@/components/nav";
 import "./globals.css";
 
 const font = Be_Vietnam_Pro({
@@ -25,16 +24,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="vi">
-      <body className={`${font.variable} font-sans antialiased`}>
-        <div className="flex min-h-dvh">
-          <SideNav />
-          <div className="min-w-0 flex-1">
-            <MobileTopBar />
-            <main className="mx-auto w-full max-w-5xl px-4 pt-5 pb-24 sm:px-6 md:pt-8 md:pb-10">{children}</main>
-          </div>
-        </div>
-        <MobileNav />
-      </body>
+      <body className={`${font.variable} font-sans antialiased`}>{children}</body>
     </html>
   );
 }

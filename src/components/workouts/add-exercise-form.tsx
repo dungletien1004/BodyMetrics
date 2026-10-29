@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
-import { createExercise } from "@/app/workouts/exercises/actions";
+import { createExercise } from "@/app/(app)/workouts/exercises/actions";
 import { Button, Field, Input, Select } from "@/components/ui";
 import { CATEGORIES, CATEGORY_LABEL } from "@/lib/workouts";
 

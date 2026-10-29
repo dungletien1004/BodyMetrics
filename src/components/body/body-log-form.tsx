@@ -2,7 +2,7 @@
 
 import { ImagePlus } from "lucide-react";
 import { useActionState, useEffect, useRef, useState } from "react";
-import { addBodyLog, type BodyFormState } from "@/app/body/actions";
+import { addBodyLog, type BodyFormState } from "@/app/(app)/body/actions";
 import { Button, Field, Input } from "@/components/ui";
 
 export function BodyLogForm({ today }: { today: string }) {
