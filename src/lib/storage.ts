@@ -31,11 +31,22 @@ export async function saveImage(file: File, kind: "food" | "body"): Promise<Stor
   if (file.size > MAX_UPLOAD_BYTES) throw new Error("Ảnh quá lớn (tối đa 20 MB)");
 
   const input = Buffer.from(await file.arrayBuffer());
-  const { data, info } = await sharp(input)
-    .rotate()
-    .resize({ width: MAX_EDGE, height: MAX_EDGE, fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 82 })
-    .toBuffer({ resolveWithObject: true });
+  let result;
+  try {
+    result = await sharp(input)
+      .rotate()
+      .resize({ width: MAX_EDGE, height: MAX_EDGE, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toBuffer({ resolveWithObject: true });
+  } catch {
+    const heic = /\.(heic|heif)$/i.test(file.name) || /heic|heif/i.test(file.type);
+    throw new Error(
+      heic
+        ? "Chưa đọc được ảnh HEIC. Trên iPhone, vào Cài đặt > Camera > Định dạng, chọn \"Tương thích nhất\", hoặc chụp màn hình ảnh rồi tải lên."
+        : "Không đọc được ảnh này. Hãy thử ảnh JPG hoặc PNG khác.",
+    );
+  }
+  const { data, info } = result;
 
   const month = new Date().toISOString().slice(0, 7);
   const rel = `${kind}/${month}/${randomUUID()}.webp`;

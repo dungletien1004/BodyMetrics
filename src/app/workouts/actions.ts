@@ -87,7 +87,7 @@ export async function saveWorkout(id: string | null, input: WorkoutPayload): Pro
 export async function deleteWorkout(id: string, redirectTo?: string) {
   await db.workout.deleteMany({ where: { id } });
   revalidatePath("/", "layout");
-  if (redirectTo) redirect(redirectTo);
+  if (redirectTo?.startsWith("/workouts")) redirect(redirectTo);
 }
 
 /** Weight the server will use for a day, so the builder preview matches the saved numbers. */

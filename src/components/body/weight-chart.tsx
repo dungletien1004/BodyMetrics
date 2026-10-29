@@ -20,7 +20,15 @@ export function WeightChart({ data, goal, height = 240 }: { data: WeightPoint[];
         <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
           <CartesianGrid stroke="var(--border)" vertical={false} />
           <XAxis dataKey="label" tick={{ fill: "var(--muted)" }} tickLine={false} axisLine={false} minTickGap={24} />
-          <YAxis domain={[min, max]} tick={{ fill: "var(--muted)" }} tickLine={false} axisLine={false} width={44} />
+          <YAxis
+            domain={[min, max]}
+            allowDecimals={false}
+            tickCount={5}
+            tick={{ fill: "var(--muted)" }}
+            tickLine={false}
+            axisLine={false}
+            width={44}
+          />
           <Tooltip
             contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12 }}
             labelStyle={{ color: "var(--muted)" }}

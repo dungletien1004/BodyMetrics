@@ -1,5 +1,5 @@
-import { Trash2 } from "lucide-react";
 import { BodyLogForm } from "@/components/body/body-log-form";
+import { DeleteBodyLogButton } from "@/components/body/delete-body-log-button";
 import { WeightChart } from "@/components/body/weight-chart";
 import { Badge, Button, Card, CardTitle, EmptyState, PageHeader, Select, Stat } from "@/components/ui";
 import { bmi } from "@/lib/calc";
@@ -9,7 +9,6 @@ import { formatDayLong, formatDayShort, todayKey } from "@/lib/dates";
 import { num, signed } from "@/lib/format";
 import { uploadUrl } from "@/lib/storage";
 import { getProfile } from "@/lib/summary";
-import { deleteBodyLog } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -153,12 +152,7 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={uploadUrl(l.photos[0].path)} alt="" className="size-11 rounded-lg object-cover" />
                     )}
-                    <form action={deleteBodyLog}>
-                      <input type="hidden" name="id" value={l.id} />
-                      <Button variant="danger" className="px-2" aria-label="Xóa">
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </form>
+                    <DeleteBodyLogButton id={l.id} hasPhotos={l.photos.length > 0} />
                   </li>
                 ))}
               </ul>

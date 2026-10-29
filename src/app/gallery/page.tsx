@@ -19,7 +19,9 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
   const kind = KINDS.some((k) => k.value === sp.kind) ? sp.kind! : "all";
   const page = Math.max(1, Number(sp.page) || 1);
 
-  const where = kind === "all" ? {} : { kind };
+  // Food photos only count once their meal is saved; unsaved uploads are cleaned up later.
+  const linked = { OR: [{ kind: "body" }, { mealId: { not: null } }] };
+  const where = kind === "all" ? linked : { AND: [linked, { kind }] };
   const [photos, total] = await Promise.all([
     db.photo.findMany({
       where,

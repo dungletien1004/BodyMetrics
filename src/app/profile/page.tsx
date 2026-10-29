@@ -14,7 +14,8 @@ const ACTIVITY = [
   { value: 1.5, label: "Lao động chân tay" },
 ];
 
-export default async function ProfilePage() {
+export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {
+  const { saved } = await searchParams;
   const [p, weight] = await Promise.all([getProfile(), getWeightOn(todayKey())]);
   const rate = -p.dailyDeficit * 7 / 7700;
   const weeks = p.goalWeightKg ? weeksToGoal(weight, p.goalWeightKg, rate) : null;
@@ -62,8 +63,9 @@ export default async function ProfilePage() {
             <Field label="Protein (g / kg cân nặng)" hint="Khuyến nghị 1,6–2,2 khi giảm cân">
               <Input name="proteinPerKg" type="number" step="0.1" inputMode="decimal" defaultValue={p.proteinPerKg} />
             </Field>
-            <div className="sm:col-span-2">
+            <div className="flex items-center gap-3 sm:col-span-2">
               <Button type="submit">Lưu hồ sơ</Button>
+              {saved && <span className="text-sm text-accent">Đã lưu.</span>}
             </div>
           </form>
         </Card>

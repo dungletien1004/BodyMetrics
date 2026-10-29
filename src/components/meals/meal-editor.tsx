@@ -175,6 +175,12 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
     );
   }
 
+  // Grams typed after the macros become the scaling base once the field is left, so the
+  // next portion change rescales. Done on blur, not per keystroke, so "2" -> "20" -> "200" doesn't scale.
+  function lockBase(key: string) {
+    setRows((prev) => prev.map((r) => (r.key === key && !r.base ? { ...r, base: snapshot(r) } : r)));
+  }
+
   function addRow(item: MealItemInput = emptyItem) {
     setRows((prev) => {
       // Fill a blank first row instead of leaving it dangling.
@@ -209,8 +215,28 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
       setError("Số liệu không được âm.");
       return;
     }
-    const input: MealInput = { date, type, time, note, items, photoId: photo?.id ?? null, aiRaw };
     startSaving(async () => {
+      // A photo that was picked but never sent for analysis is uploaded now rather than dropped.
+      let photoId = photo?.id ?? null;
+      if (file && !photo) {
+        const fd = new FormData();
+        fd.set("photo", file);
+        fd.set("date", date);
+        fd.set("skipAi", "1");
+        try {
+          const up = await analyzePhoto(fd);
+          if (!up.ok) {
+            setError(up.error);
+            return;
+          }
+          photoId = up.photoId;
+          setPhoto({ id: up.photoId, url: up.photoUrl });
+        } catch {
+          setError("Không gửi được ảnh. Ảnh có thể quá lớn (tối đa 20 MB) hoặc máy chủ không phản hồi.");
+          return;
+        }
+      }
+      const input: MealInput = { date, type, time, note, items, photoId, aiRaw };
       const res = mode === "edit" && mealId ? await updateMeal(mealId, input) : await createMeal(input);
       if (res?.error) setError(res.error);
     });
@@ -329,7 +355,7 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
                   </button>
                 </div>
                 <div className="grid grid-cols-5 gap-1.5 md:w-[26rem] md:gap-2">
-                  <NumInput label="Gram" value={r.portionG} onChange={(v) => updateRow(r.key, "portionG", v)} />
+                  <NumInput label="Gram" value={r.portionG} onChange={(v) => updateRow(r.key, "portionG", v)} onBlur={() => lockBase(r.key)} />
                   <NumInput label="Kcal" value={r.kcal} onChange={(v) => updateRow(r.key, "kcal", v)} />
                   <NumInput label="Đạm" value={r.proteinG} onChange={(v) => updateRow(r.key, "proteinG", v)} />
                   <NumInput label="T.bột" value={r.carbG} onChange={(v) => updateRow(r.key, "carbG", v)} />
@@ -430,7 +456,17 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
   );
 }
 
-function NumInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function NumInput({
+  label,
+  value,
+  onChange,
+  onBlur,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  onBlur?: () => void;
+}) {
   return (
     <label className="block min-w-0">
       <span className="mb-0.5 block text-[11px] text-muted md:hidden">{label}</span>
@@ -440,6 +476,7 @@ function NumInput({ label, value, onChange }: { label: string; value: string; on
         inputMode="decimal"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         aria-label={label}
         className="w-full rounded-xl border border-border bg-surface px-1.5 py-2 text-right text-sm tabular-nums outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
       />

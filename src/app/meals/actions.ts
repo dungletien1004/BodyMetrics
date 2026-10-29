@@ -62,6 +62,8 @@ export async function analyzePhoto(form: FormData): Promise<AnalyzePhotoResult> 
   }
 
   const base = { ok: true as const, photoId: photo.id, photoUrl: uploadUrl(photo.path) };
+  // Upload-only: the editor saves a picked photo that was never analyzed.
+  if (form.get("skipAi") === "1") return { ...base, items: [], notes: null, aiRaw: null, warning: null };
   if (!hasAiKey()) {
     return {
       ...base,

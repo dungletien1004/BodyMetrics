@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { parseNum } from "@/lib/format";
 
@@ -23,4 +24,5 @@ export async function saveProfile(form: FormData) {
 
   await db.profile.upsert({ where: { id: 1 }, update: data, create: { id: 1, ...data } });
   revalidatePath("/", "layout");
+  redirect("/profile?saved=1");
 }

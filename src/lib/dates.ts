@@ -31,8 +31,11 @@ export function weekStartKey(key: string): string {
   return dayKey(startOfWeek(parseDay(key), { weekStartsOn: 1 }));
 }
 
+/** A real calendar date in YYYY-MM-DD form (rejects 2026-13-45, 2026-02-30). */
 export function isDayKey(s: unknown): s is string {
-  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = parseISO(s);
+  return !Number.isNaN(d.getTime()) && dayKey(d) === s;
 }
 
 /** "Thứ Tư, 29/10" */
