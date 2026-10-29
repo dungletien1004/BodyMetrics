@@ -1,32 +1,24 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import path from "node:path";
 import sharp from "sharp";
+import { db } from "./db";
 
-export const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR ?? "./uploads");
+// Photos are re-encoded as WebP and stored in the ImageBlob table; `Photo.path` holds the blob id.
 
 const MAX_EDGE = 1600;
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 export interface StoredImage {
-  path: string; // relative, forward slashes
+  path: string; // ImageBlob id
   width: number;
   height: number;
 }
 
-/** Resolve a stored relative path, refusing anything that escapes UPLOAD_DIR. */
-export function resolveUpload(rel: string): string | null {
-  const abs = path.resolve(UPLOAD_DIR, rel);
-  return abs.startsWith(UPLOAD_DIR + path.sep) ? abs : null;
+export function uploadUrl(id: string): string {
+  return `/api/uploads/${id}`;
 }
 
-export function uploadUrl(rel: string): string {
-  return `/api/uploads/${rel}`;
-}
-
-/** Auto-rotate, downscale and re-encode an uploaded image as WebP under uploads/<kind>/YYYY-MM/. */
-export async function saveImage(file: File, kind: "food" | "body"): Promise<StoredImage> {
+/** Auto-rotate, downscale and re-encode an uploaded image as WebP, then store it. */
+export async function saveImage(file: File): Promise<StoredImage> {
   if (!file.type.startsWith("image/")) throw new Error("Tệp không phải hình ảnh");
   if (file.size > MAX_UPLOAD_BYTES) throw new Error("Ảnh quá lớn (tối đa 20 MB)");
 
@@ -36,7 +28,7 @@ export async function saveImage(file: File, kind: "food" | "body"): Promise<Stor
     result = await sharp(input)
       .rotate()
       .resize({ width: MAX_EDGE, height: MAX_EDGE, fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 82 })
+      .webp({ quality: 80 })
       .toBuffer({ resolveWithObject: true });
   } catch {
     const heic = /\.(heic|heif)$/i.test(file.name) || /heic|heif/i.test(file.type);
@@ -47,31 +39,25 @@ export async function saveImage(file: File, kind: "food" | "body"): Promise<Stor
     );
   }
   const { data, info } = result;
-
-  const month = new Date().toISOString().slice(0, 7);
-  const rel = `${kind}/${month}/${randomUUID()}.webp`;
-  const abs = resolveUpload(rel)!;
-  await mkdir(path.dirname(abs), { recursive: true });
-  await writeFile(abs, data);
-  return { path: rel, width: info.width, height: info.height };
+  const blob = await db.imageBlob.create({ data: { data: new Uint8Array(data) }, select: { id: true } });
+  return { path: blob.id, width: info.width, height: info.height };
 }
 
-export async function readImage(rel: string): Promise<Buffer> {
-  const abs = resolveUpload(rel);
-  if (!abs) throw new Error("Invalid upload path");
-  return readFile(abs);
+export async function readImage(id: string): Promise<{ data: Uint8Array; mime: string } | null> {
+  return db.imageBlob.findUnique({ where: { id }, select: { data: true, mime: true } });
 }
 
 /** JPEG copy for sending to the vision model. */
-export async function imageAsJpegBase64(rel: string, maxEdge = 1280): Promise<string> {
-  const buf = await sharp(await readImage(rel))
+export async function imageAsJpegBase64(id: string, maxEdge = 1280): Promise<string> {
+  const img = await readImage(id);
+  if (!img) throw new Error("Image not found");
+  const buf = await sharp(img.data)
     .resize({ width: maxEdge, height: maxEdge, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 85 })
     .toBuffer();
   return buf.toString("base64");
 }
 
-export async function deleteImage(rel: string): Promise<void> {
-  const abs = resolveUpload(rel);
-  if (abs) await unlink(abs).catch(() => {});
+export async function deleteImage(id: string): Promise<void> {
+  await db.imageBlob.deleteMany({ where: { id } });
 }

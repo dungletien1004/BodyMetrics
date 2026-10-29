@@ -4,11 +4,12 @@
 
 ## Cài đặt
 
-Cần Node.js 20 trở lên.
+Cần Node.js 20 trở lên và Docker (để chạy Postgres trên máy).
 
 ```bash
 cp .env.example .env
 npm install
+npm run db:up
 npm run setup
 npm run dev
 ```
@@ -39,14 +40,11 @@ Chạy `npm run dev -- -H 0.0.0.0` rồi mở địa chỉ IP của máy tính t
 
 ## Deploy và kết nối với Claude
 
-Xem [DEPLOY.md](DEPLOY.md): chạy bằng Docker trên Render qua `render.yaml` (hoặc host bất kỳ có volume), rồi thêm BodyMetrics làm connector trong claude.ai. Khi đó bạn gửi ảnh bữa ăn hoặc buổi tập cho Claude bằng tài khoản Claude của mình, Claude phân tích và tự lưu vào app.
+Xem [DEPLOY.md](DEPLOY.md): deploy miễn phí lên Vercel với database Neon, rồi thêm BodyMetrics làm connector trong claude.ai. Khi đó bạn gửi ảnh bữa ăn hoặc buổi tập cho Claude bằng tài khoản Claude của mình, Claude phân tích và tự lưu vào app.
 
 ## Dữ liệu
 
-- Cơ sở dữ liệu: `prisma/dev.db` (SQLite)
-- Ảnh: thư mục `uploads/`
-
-Sao lưu hai mục trên là đủ giữ toàn bộ dữ liệu.
+Toàn bộ dữ liệu, kể cả ảnh, nằm trong Postgres. Trên máy là container Docker `db` (`npm run db:up`); trên web là Neon.
 
 ## Cách tính
 

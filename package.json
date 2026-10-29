@@ -9,6 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate",
+    "vercel-build": "prisma db push --skip-generate && prisma db seed && next build",
+    "db:up": "docker compose up -d db",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "setup": "prisma db push && prisma db seed",

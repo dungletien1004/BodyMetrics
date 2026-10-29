@@ -7,6 +7,8 @@ import { formatDayLong, isDayKey, todayKey } from "@/lib/dates";
 import { getRecentFoods } from "../recent";
 
 export const dynamic = "force-dynamic";
+// AI calls (photo analysis, weekly report) can take tens of seconds on serverless hosts.
+export const maxDuration = 60;
 
 export default async function NewMealPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   const { date: dateParam } = await searchParams;

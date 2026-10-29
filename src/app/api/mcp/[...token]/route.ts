@@ -6,6 +6,8 @@ import { MCP_INSTRUCTIONS, registerTools } from "@/lib/mcp/server";
 // credential (claude.ai custom connectors accept a plain URL), so treat the full URL as a password.
 
 export const dynamic = "force-dynamic";
+// AI calls (photo analysis, weekly report) can take tens of seconds on serverless hosts.
+export const maxDuration = 60;
 
 const handler = createMcpHandler(registerTools, {
   serverInfo: { name: "BodyMetrics", version: "1.0.0" },

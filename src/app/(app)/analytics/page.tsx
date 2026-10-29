@@ -12,6 +12,8 @@ import { getProfile } from "@/lib/summary";
 import { WeeklyReports } from "./weekly-reports";
 
 export const dynamic = "force-dynamic";
+// AI calls (photo analysis, weekly report) can take tens of seconds on serverless hosts.
+export const maxDuration = 60;
 
 const fullDate = (key: string) => key.split("-").reverse().join("/");
 

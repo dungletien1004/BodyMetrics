@@ -1,50 +1,51 @@
-# Deploy BodyMetrics lên web
+# Deploy BodyMetrics lên web (miễn phí)
 
-App chạy bằng Docker. Dữ liệu (database SQLite và ảnh) nằm trong thư mục `/data`, nên nơi chạy phải có **ổ lưu trữ cố định (disk/volume)** gắn vào `/data`. Không có ổ này thì mỗi lần deploy lại sẽ mất hết dữ liệu.
+App chạy trên **Vercel** (gói Hobby, miễn phí, không cần thẻ) với database **Neon Postgres** (gói Free). Ảnh được lưu trong database, nên không cần ổ đĩa riêng.
 
-Khuyến nghị: **Render**. Repo đã có sẵn `render.yaml`, Render tự tạo service, ổ đĩa và biến môi trường. Chi phí khoảng 7 USD/tháng (gói Starter, bắt buộc để có ổ đĩa) cộng 0,25 USD/GB ổ đĩa.
+Giới hạn của gói miễn phí: Neon Free có 0,5 GB, đủ cho vài nghìn ảnh đã nén cùng toàn bộ nhật ký. Lần mở đầu tiên sau một thời gian dài không dùng có thể chậm vài giây vì database "ngủ".
 
-## 1. Render (Blueprint)
+## 1. Tạo project trên Vercel
 
-1. Đăng nhập https://dashboard.render.com bằng GitHub, cho phép Render đọc repo `BodyMetrics`.
-2. **New → Blueprint** → chọn repo `BodyMetrics` → Render đọc `render.yaml`.
-3. Render hỏi `ANTHROPIC_API_KEY`: để trống nếu chưa có.
-4. Bấm **Apply**. Render tạo service `bodymetrics` ở Singapore, ổ `/data` 1 GB, tự sinh `AUTH_SECRET`, `AUTH_PASSWORD` và `MCP_TOKEN`, rồi build và deploy.
-5. Địa chỉ app có dạng `https://bodymetrics-xxxx.onrender.com`. Mật khẩu lần đầu nằm ở service → **Environment** → `AUTH_PASSWORD`. Đăng nhập bằng `admin` và mật khẩu đó, rồi đổi mật khẩu trong **Hồ sơ**.
+1. Đăng nhập https://vercel.com bằng GitHub.
+2. **Add New → Project** → chọn repo `BodyMetrics` → **Import**. Chưa bấm Deploy vội nếu Vercel cho phép; nếu lỡ deploy, lần đầu sẽ lỗi vì thiếu database, không sao.
 
-Mỗi lần push lên nhánh `main`, Render tự build và deploy lại; dữ liệu trên ổ `/data` được giữ nguyên.
+## 2. Thêm database Neon
 
-## 2. Biến môi trường
+1. Trong project: **Storage → Create Database → Neon (Serverless Postgres)** → gói **Free** → tạo và **Connect** với project.
+2. Vercel tự thêm `DATABASE_URL` và `DATABASE_URL_UNPOOLED` vào biến môi trường.
 
-| Biến | Ý nghĩa |
+## 3. Biến môi trường
+
+**Settings → Environment Variables**, thêm cho môi trường Production:
+
+| Biến | Giá trị |
 |---|---|
-| `AUTH_SECRET` | Khóa ký cookie đăng nhập, 32+ ký tự ngẫu nhiên (Render tự sinh) |
-| `AUTH_USERNAME`, `AUTH_PASSWORD` | Tài khoản được tạo ở lần đăng nhập đầu tiên. Sau đó đổi mật khẩu trong **Hồ sơ** |
-| `MCP_TOKEN` | Phần bí mật trong URL connector cho Claude (Render tự sinh) |
+| `AUTH_SECRET` | Chuỗi ngẫu nhiên 32+ ký tự |
+| `AUTH_USERNAME` | `admin` (hoặc tên bạn muốn) |
+| `AUTH_PASSWORD` | Mật khẩu đăng nhập lần đầu |
+| `MCP_TOKEN` | Chuỗi ngẫu nhiên 24+ ký tự, dùng cho connector Claude |
 | `ANTHROPIC_API_KEY` | Tùy chọn, để phân tích ảnh ngay trong app |
 
-`DATABASE_URL`, `UPLOAD_DIR`, `PORT` và `TZ=Asia/Ho_Chi_Minh` đã có mặc định trong image.
+File `.env.production.local` trên máy đã có sẵn giá trị ngẫu nhiên cho `AUTH_SECRET`, `AUTH_PASSWORD`, `MCP_TOKEN`.
 
-## 3. Kết nối với Claude (claude.ai)
+Múi giờ mặc định là `Asia/Ho_Chi_Minh` (đặt trong code, đổi bằng `APP_TIMEZONE` nếu cần).
 
-1. Trên Render, mở service → **Environment** → xem giá trị `MCP_TOKEN`.
-2. Trên claude.ai: **Settings → Connectors → Add custom connector**.
-3. Tên: `BodyMetrics`. URL: `https://<địa-chỉ-app>/api/mcp/<MCP_TOKEN>` (dán nguyên token, kể cả dấu `/`, `+`, `=` nếu có).
-4. Trong cuộc trò chuyện, bật connector BodyMetrics, gửi ảnh bữa ăn hoặc ảnh buổi tập và nói ví dụ "ghi bữa trưa này". Claude sẽ phân tích, lưu vào app và báo lại lượng calo còn lại trong ngày.
+## 4. Deploy
 
-Coi toàn bộ URL connector như mật khẩu: ai có URL đều ghi được dữ liệu. Muốn thu hồi, đổi `MCP_TOKEN` trên Render rồi cập nhật lại URL trong claude.ai.
+**Deployments → Redeploy** (hoặc push lên `main`). Lệnh build `vercel-build` tự tạo bảng trong database, nạp thư viện bài tập rồi build app. Địa chỉ có dạng `https://bodymetrics-xxx.vercel.app`.
 
-## Nơi khác (Railway, Fly.io, VPS…)
+Đăng nhập bằng `AUTH_USERNAME` / `AUTH_PASSWORD`, rồi đổi mật khẩu trong **Hồ sơ**.
 
-Bất kỳ nơi nào chạy được Docker và có volume gắn vào `/data`:
+Từ đó, mỗi lần push lên `main` Vercel tự deploy lại; dữ liệu trong Neon giữ nguyên.
 
-```bash
-docker build -t bodymetrics .
-docker run -d -p 3000:3000 -v bodymetrics-data:/data --env-file .env.production.local bodymetrics
-```
+## 5. Kết nối với Claude (claude.ai)
 
-File `.env.production.local` trên máy đã có sẵn các giá trị ngẫu nhiên. Cần đặt app sau HTTPS (cookie đăng nhập chỉ gửi qua HTTPS khi chạy production). Chỉ để thử qua `http://` thì thêm `AUTH_INSECURE_COOKIE=1`.
+1. Trên claude.ai: **Settings → Connectors → Add custom connector**.
+2. Tên: `BodyMetrics`. URL: `https://<địa-chỉ-app>/api/mcp/<MCP_TOKEN>`.
+3. Trong cuộc trò chuyện, bật connector BodyMetrics, gửi ảnh bữa ăn hoặc ảnh buổi tập và nói ví dụ "ghi bữa trưa này". Claude sẽ phân tích, lưu vào app và báo lại lượng calo còn lại trong ngày.
+
+Coi toàn bộ URL connector như mật khẩu: ai có URL đều ghi được dữ liệu. Muốn thu hồi, đổi `MCP_TOKEN` trên Vercel, redeploy, rồi cập nhật lại URL trong claude.ai.
 
 ## Sao lưu
 
-Sao lưu thư mục `/data` (file `bodymetrics.db` và thư mục `uploads/`). Render tự chụp snapshot ổ đĩa mỗi ngày và giữ 7 ngày.
+Neon giữ lịch sử để khôi phục trong 6 giờ gần nhất ở gói Free. Muốn sao lưu đầy đủ: `pg_dump "$DATABASE_URL_UNPOOLED" > backup.sql`.

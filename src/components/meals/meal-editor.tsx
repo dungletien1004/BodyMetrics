@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { analyzePhoto, createMeal, discardPhoto, updateMeal } from "@/app/(app)/meals/actions";
 import { Badge, Button, Card, CardTitle, cn, Field, Input, Textarea } from "@/components/ui";
+import { downscaleImage } from "@/lib/client-image";
 import { kcal as fmtKcal, num, parseNum } from "@/lib/format";
 import {
   LOW_CONFIDENCE,
@@ -110,16 +111,18 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
     return (q ? recentFoods.filter((f) => f.name.toLowerCase().includes(q)) : recentFoods).slice(0, 12);
   }, [query, recentFoods]);
 
-  function pickFile(f: File | undefined) {
-    if (!f) return;
+  async function pickFile(picked: File | undefined) {
+    if (!picked) return;
     // A different picture replaces the one already uploaded.
     if (photo) void discardPhoto(photo.id);
     setPhoto(null);
     setAiRaw(null);
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
     setWarning(null);
     setError(null);
+    // Shrunk in the browser so the upload stays under the host's request size limit.
+    const f = await downscaleImage(picked);
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
   }
 
   async function runAnalysis() {
@@ -254,8 +257,8 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
       {mode === "new" ? (
         <Card>
           <CardTitle>Ảnh món ăn</CardTitle>
-          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
-          <input ref={libraryRef} type="file" accept="image/*" className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => void pickFile(e.target.files?.[0])} />
+          <input ref={libraryRef} type="file" accept="image/*" className="hidden" onChange={(e) => void pickFile(e.target.files?.[0])} />
 
           {preview ? (
             <div className="relative mb-3 overflow-hidden rounded-xl bg-surface-2">

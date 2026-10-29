@@ -22,7 +22,7 @@ export async function addBodyLog(_prev: BodyFormState, form: FormData): Promise<
   if (weightKg != null && (weightKg < 25 || weightKg > 350)) return { ok: false, message: "Cân nặng không hợp lệ." };
 
   try {
-    const stored = await Promise.all(files.map((f) => saveImage(f, "body")));
+    const stored = await Promise.all(files.map((f) => saveImage(f)));
     await db.bodyLog.create({
       data: {
         date,

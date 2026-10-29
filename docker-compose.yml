@@ -1,0 +1,15 @@
+# Local Postgres for development (production uses Neon). Start with `npm run db:up`.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bodymetrics
+      POSTGRES_PASSWORD: bodymetrics
+      POSTGRES_DB: bodymetrics
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

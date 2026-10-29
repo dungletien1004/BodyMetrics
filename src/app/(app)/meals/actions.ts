@@ -52,7 +52,7 @@ export async function analyzePhoto(form: FormData): Promise<AnalyzePhotoResult> 
 
   let photo;
   try {
-    const stored = await saveImage(file, "food");
+    const stored = await saveImage(file);
     photo = await db.photo.create({
       data: { kind: "food", path: stored.path, width: stored.width, height: stored.height, date },
     });

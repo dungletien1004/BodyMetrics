@@ -1,4 +1,4 @@
-// BodyMetrics data model. Local SQLite, single user.
+// BodyMetrics data model. Postgres (Neon in production, Docker locally), single user.
 // Apply changes with `npm run db:push` (no migration files).
 // Dates that represent a "day" are stored as local "YYYY-MM-DD" strings (see src/lib/dates.ts).
 
@@ -7,8 +7,18 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Neon's pooled URL can't run schema pushes; the unpooled one is used for those.
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+// Photo bytes (WebP), kept in the database so the app needs no disk.
+model ImageBlob {
+  id        String   @id @default(cuid())
+  mime      String   @default("image/webp")
+  data      Bytes
+  createdAt DateTime @default(now())
 }
 
 // Login account. Created from AUTH_USERNAME / AUTH_PASSWORD on first login, or with `npm run user:create`.
@@ -53,7 +63,7 @@ model BodyLog {
 model Photo {
   id        String   @id @default(cuid())
   kind      String // food | body
-  path      String // relative to UPLOAD_DIR, served at /api/uploads/<path>
+  path      String // ImageBlob id, served at /api/uploads/<path>
   width     Int
   height    Int
   date      String

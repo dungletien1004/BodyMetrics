@@ -4,7 +4,7 @@ Personal weight-loss tracker: meals (with AI photo calorie analysis), gym/cardio
 
 ## Stack
 - Next.js 15 App Router + TypeScript + Tailwind v4 (theme tokens in `src/app/globals.css`)
-- Prisma 6 + SQLite (`prisma/schema.prisma`), images on disk under `UPLOAD_DIR`
+- Prisma 6 + Postgres (`prisma/schema.prisma`; Neon in production, `npm run db:up` locally), photos stored in the database
 - Recharts for charts, lucide-react for icons, date-fns for dates
 - Claude API (`@anthropic-ai/sdk`) for food photo analysis and weekly reports
 
@@ -20,7 +20,7 @@ Personal weight-loss tracker: meals (with AI photo calorie analysis), gym/cardio
 - Energy math lives in `src/lib/calc.ts` (pure). Exercise kcal = `exerciseKcal(met, kg, minutes, intensity)` (net of resting MET). Store the computed value in `WorkoutEntry.kcal` at save time; `Workout.kcalOverride` replaces the sum when set.
 - Daily totals/targets come from `getDaySummaries(from, to)` / `getDaySummary(date)` in `src/lib/summary.ts`. Reuse them; don't re-aggregate meals/workouts by hand.
 - Weight for a day: `getWeightOn(day)` (latest log on/before that day).
-- Images: `saveImage(file, "food" | "body")` from `src/lib/storage.ts` returns a relative path; create a `Photo` row; render with `uploadUrl(path)`. `imageAsJpegBase64(path)` gives a JPEG for the vision model.
+- Images: `saveImage(file)` from `src/lib/storage.ts` stores the photo as WebP in the `ImageBlob` table and returns its id; create a `Photo` row; render with `uploadUrl(path)`. `imageAsJpegBase64(path)` gives a JPEG for the vision model.
 - AI: `anthropic()` and `AI_MODEL` from `src/lib/ai/client.ts`. Check `hasAiKey()` and show a friendly message when no key. Load the `claude-api` skill before writing Claude API code.
 - Mutations use server actions in a colocated `actions.ts` (`"use server"`), then `revalidatePath`. Parse numeric form fields with `parseNum` from `src/lib/format.ts`.
 - Next 15: `params` and `searchParams` are Promises - `await` them.

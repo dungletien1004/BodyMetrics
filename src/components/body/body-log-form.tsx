@@ -4,11 +4,26 @@ import { ImagePlus } from "lucide-react";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { addBodyLog, type BodyFormState } from "@/app/(app)/body/actions";
 import { Button, Field, Input } from "@/components/ui";
+import { downscaleImage } from "@/lib/client-image";
 
 export function BodyLogForm({ today }: { today: string }) {
   const [state, action, pending] = useActionState<BodyFormState, FormData>(addBodyLog, null);
   const formRef = useRef<HTMLFormElement>(null);
   const [previews, setPreviews] = useState<string[]>([]);
+  const [resizing, setResizing] = useState(false);
+
+  // Shrink photos in the browser first so the upload stays under the host's request limit.
+  async function submit(form: FormData) {
+    const files = form.getAll("photos").filter((f): f is File => f instanceof File && f.size > 0);
+    form.delete("photos");
+    setResizing(true);
+    try {
+      for (const f of await Promise.all(files.map(downscaleImage))) form.append("photos", f);
+    } finally {
+      setResizing(false);
+    }
+    action(form);
+  }
 
   useEffect(() => {
     if (state?.ok) {
@@ -20,7 +35,7 @@ export function BodyLogForm({ today }: { today: string }) {
   useEffect(() => () => previews.forEach(URL.revokeObjectURL), [previews]);
 
   return (
-    <form ref={formRef} action={action} className="grid grid-cols-2 gap-3">
+    <form ref={formRef} action={submit} className="grid grid-cols-2 gap-3">
       <Field label="Ngày" className="col-span-2">
         <Input name="date" type="date" defaultValue={today} max={today} required />
       </Field>
@@ -59,8 +74,8 @@ export function BodyLogForm({ today }: { today: string }) {
       )}
 
       <div className="col-span-2 flex items-center gap-3">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Đang lưu…" : "Lưu"}
+        <Button type="submit" disabled={pending || resizing}>
+          {pending || resizing ? "Đang lưu…" : "Lưu"}
         </Button>
         {state && <span className={state.ok ? "text-sm text-accent" : "text-sm text-danger"}>{state.message}</span>}
       </div>
