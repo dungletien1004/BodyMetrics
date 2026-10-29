@@ -1,0 +1,171 @@
+import { Trash2 } from "lucide-react";
+import { BodyLogForm } from "@/components/body/body-log-form";
+import { WeightChart } from "@/components/body/weight-chart";
+import { Badge, Button, Card, CardTitle, EmptyState, PageHeader, Select, Stat } from "@/components/ui";
+import { bmi } from "@/lib/calc";
+import { getWeightSeries } from "@/lib/body";
+import { db } from "@/lib/db";
+import { formatDayLong, formatDayShort, todayKey } from "@/lib/dates";
+import { num, signed } from "@/lib/format";
+import { uploadUrl } from "@/lib/storage";
+import { getProfile } from "@/lib/summary";
+import { deleteBodyLog } from "./actions";
+
+export const dynamic = "force-dynamic";
+
+const RANGES = [30, 90, 180];
+
+export default async function BodyPage({ searchParams }: { searchParams: Promise<{ days?: string; a?: string; b?: string }> }) {
+  const sp = await searchParams;
+  const days = RANGES.includes(Number(sp.days)) ? Number(sp.days) : 90;
+  const today = todayKey();
+
+  const [profile, series, logs, bodyPhotos] = await Promise.all([
+    getProfile(),
+    getWeightSeries(days),
+    db.bodyLog.findMany({ orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 60, include: { photos: true } }),
+    db.photo.findMany({ where: { kind: "body" }, orderBy: [{ date: "asc" }, { takenAt: "asc" }] }),
+  ]);
+
+  const current = series.latestAvg ?? series.latest;
+  const start = profile.startWeightKg ?? series.firstWeight;
+  const hasWeights = series.points.some((p) => p.weight != null);
+
+  // Progress photo comparison: defaults to first vs latest.
+  const photoA = bodyPhotos.find((p) => p.id === sp.a) ?? bodyPhotos[0];
+  const photoB = bodyPhotos.find((p) => p.id === sp.b) ?? bodyPhotos.at(-1);
+
+  return (
+    <>
+      <PageHeader title="Cơ thể" subtitle="Cân nặng, số đo và ảnh tiến trình. Nên cân vào buổi sáng, cùng điều kiện mỗi ngày." />
+
+      <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
+        <div className="space-y-4">
+          <Card>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Stat label="Hiện tại (TB 7 ngày)" value={num(current)} unit="kg" sub={series.latest ? `Lần cân gần nhất ${num(series.latest)} kg` : undefined} />
+              <Stat
+                label="7 ngày qua"
+                value={series.weekChange != null ? signed(series.weekChange, 1) : "–"}
+                unit="kg"
+                tone={series.weekChange != null && series.weekChange <= 0 ? "accent" : undefined}
+              />
+              <Stat
+                label="Từ lúc bắt đầu"
+                value={current != null && start != null ? signed(Math.round((current - start) * 10) / 10, 1) : "–"}
+                unit="kg"
+                sub={start != null ? `Bắt đầu ${num(start)} kg` : undefined}
+              />
+              <Stat
+                label="Còn lại tới mục tiêu"
+                value={current != null && profile.goalWeightKg ? num(Math.max(0, current - profile.goalWeightKg)) : "–"}
+                unit="kg"
+                sub={current != null ? `BMI ${num(bmi(current, profile.heightCm))}` : undefined}
+              />
+            </div>
+          </Card>
+
+          <Card>
+            <CardTitle
+              action={
+                <div className="flex gap-1">
+                  {RANGES.map((r) => (
+                    <a
+                      key={r}
+                      href={`?days=${r}`}
+                      className={`rounded-lg px-2 py-1 text-xs ${r === days ? "bg-accent/10 font-medium text-accent" : "text-muted hover:bg-surface-2"}`}
+                    >
+                      {r} ngày
+                    </a>
+                  ))}
+                </div>
+              }
+            >
+              Xu hướng cân nặng
+            </CardTitle>
+            {hasWeights ? (
+              <WeightChart data={series.points} goal={profile.goalWeightKg} />
+            ) : (
+              <EmptyState title="Chưa có lần cân nào">Thêm cân nặng ở khung bên cạnh để xem xu hướng.</EmptyState>
+            )}
+            <p className="mt-2 text-xs text-muted">Chấm xám: từng lần cân. Đường xanh: trung bình 7 ngày, ít bị nhiễu bởi nước và muối.</p>
+          </Card>
+
+          {bodyPhotos.length >= 2 && photoA && photoB && (
+            <Card>
+              <CardTitle>So sánh ảnh tiến trình</CardTitle>
+              <form className="mb-3 grid grid-cols-2 gap-3">
+                <input type="hidden" name="days" value={days} />
+                {[
+                  { name: "a", value: photoA.id },
+                  { name: "b", value: photoB.id },
+                ].map((s) => (
+                  <Select key={s.name} name={s.name} defaultValue={s.value}>
+                    {bodyPhotos.map((p, i) => (
+                      <option key={p.id} value={p.id}>
+                        {formatDayShort(p.date)} · ảnh {i + 1}
+                      </option>
+                    ))}
+                  </Select>
+                ))}
+                <Button variant="secondary" type="submit" className="col-span-2 sm:col-span-1">
+                  So sánh
+                </Button>
+              </form>
+              <div className="grid grid-cols-2 gap-3">
+                {[photoA, photoB].map((p, i) => (
+                  <figure key={i}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={uploadUrl(p.path)} alt="" className="aspect-[3/4] w-full rounded-xl object-cover" />
+                    <figcaption className="mt-1 text-center text-xs text-muted">{formatDayLong(p.date)}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <Card id="new">
+            <CardTitle>Ghi chỉ số</CardTitle>
+            <BodyLogForm today={today} />
+          </Card>
+
+          <Card>
+            <CardTitle>Lịch sử</CardTitle>
+            {logs.length === 0 ? (
+              <p className="text-sm text-muted">Chưa có dữ liệu.</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {logs.map((l) => (
+                  <li key={l.id} className="flex items-center gap-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium">{formatDayLong(l.date)}</div>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {l.weightKg != null && <Badge>{num(l.weightKg)} kg</Badge>}
+                        {l.waistCm != null && <Badge>Eo {num(l.waistCm)} cm</Badge>}
+                        {l.bodyFatPct != null && <Badge>Mỡ {num(l.bodyFatPct)}%</Badge>}
+                        {l.photos.length > 0 && <Badge>{l.photos.length} ảnh</Badge>}
+                      </div>
+                      {l.note && <div className="truncate pt-1 text-xs text-muted">{l.note}</div>}
+                    </div>
+                    {l.photos[0] && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={uploadUrl(l.photos[0].path)} alt="" className="size-11 rounded-lg object-cover" />
+                    )}
+                    <form action={deleteBodyLog}>
+                      <input type="hidden" name="id" value={l.id} />
+                      <Button variant="danger" className="px-2" aria-label="Xóa">
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+      </div>
+    </>
+  );
+}

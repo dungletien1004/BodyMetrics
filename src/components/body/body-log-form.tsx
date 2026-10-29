@@ -1,0 +1,69 @@
+"use client";
+
+import { ImagePlus } from "lucide-react";
+import { useActionState, useEffect, useRef, useState } from "react";
+import { addBodyLog, type BodyFormState } from "@/app/body/actions";
+import { Button, Field, Input } from "@/components/ui";
+
+export function BodyLogForm({ today }: { today: string }) {
+  const [state, action, pending] = useActionState<BodyFormState, FormData>(addBodyLog, null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [previews, setPreviews] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (state?.ok) {
+      formRef.current?.reset();
+      setPreviews([]);
+    }
+  }, [state]);
+
+  useEffect(() => () => previews.forEach(URL.revokeObjectURL), [previews]);
+
+  return (
+    <form ref={formRef} action={action} className="grid grid-cols-2 gap-3">
+      <Field label="Ngày" className="col-span-2">
+        <Input name="date" type="date" defaultValue={today} max={today} required />
+      </Field>
+      <Field label="Cân nặng (kg)">
+        <Input name="weightKg" type="number" step="0.1" inputMode="decimal" placeholder="72,4" />
+      </Field>
+      <Field label="Vòng eo (cm)">
+        <Input name="waistCm" type="number" step="0.1" inputMode="decimal" />
+      </Field>
+      <Field label="% mỡ cơ thể">
+        <Input name="bodyFatPct" type="number" step="0.1" inputMode="decimal" />
+      </Field>
+      <Field label="Ghi chú">
+        <Input name="note" placeholder="Cân sáng, sau WC" />
+      </Field>
+
+      <label className="col-span-2 flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-border p-3 text-sm text-muted hover:bg-surface-2">
+        <ImagePlus className="size-5 text-accent" />
+        <span>Ảnh tiến trình (tùy chọn)</span>
+        <input
+          name="photos"
+          type="file"
+          accept="image/*"
+          multiple
+          className="sr-only"
+          onChange={(e) => setPreviews(Array.from(e.target.files ?? []).map((f) => URL.createObjectURL(f)))}
+        />
+      </label>
+      {previews.length > 0 && (
+        <div className="col-span-2 flex gap-2 overflow-x-auto">
+          {previews.map((src) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={src} src={src} alt="" className="h-20 w-16 shrink-0 rounded-lg object-cover" />
+          ))}
+        </div>
+      )}
+
+      <div className="col-span-2 flex items-center gap-3">
+        <Button type="submit" disabled={pending}>
+          {pending ? "Đang lưu…" : "Lưu"}
+        </Button>
+        {state && <span className={state.ok ? "text-sm text-accent" : "text-sm text-danger"}>{state.message}</span>}
+      </div>
+    </form>
+  );
+}

@@ -34,6 +34,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Claude Code worktrees
+/.claude/worktrees/
+
 # local data
 /prisma/*.db
 /prisma/*.db-journal

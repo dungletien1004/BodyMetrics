@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BodyMetrics
 
-## Getting Started
+Ứng dụng web cá nhân theo dõi quá trình giảm cân: nhật ký ăn uống (chụp ảnh để AI ước lượng calo), tập gym/cardio (tính calo theo MET), cân nặng, số đo, ảnh tiến trình, và phân tích theo tuần.
 
-First, run the development server:
+## Cài đặt
+
+Cần Node.js 20 trở lên.
 
 ```bash
+cp .env.example .env
+npm install
+npm run setup
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Mở http://localhost:3000. Vào **Hồ sơ** nhập chiều cao, năm sinh, cân nặng và mục tiêu trước.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Để dùng tính năng phân tích ảnh món ăn và báo cáo tuần, điền `ANTHROPIC_API_KEY` trong `.env`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Dùng trên điện thoại
 
-## Learn More
+Chạy `npm run dev -- -H 0.0.0.0` rồi mở địa chỉ IP của máy tính từ điện thoại (cùng mạng Wi-Fi). Có thể "Thêm vào màn hình chính" để dùng như app.
 
-To learn more about Next.js, take a look at the following resources:
+## Dữ liệu
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Cơ sở dữ liệu: `prisma/dev.db` (SQLite)
+- Ảnh: thư mục `uploads/`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Sao lưu hai mục trên là đủ giữ toàn bộ dữ liệu.
 
-## Deploy on Vercel
+## Cách tính
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **BMR** theo Mifflin-St Jeor; **tiêu hao cơ bản** = BMR × hệ số vận động thường ngày.
+- **Calo buổi tập** = (MET × hệ số cường độ − 1) × kg × giờ, đã trừ phần nghỉ ngơi đã tính trong BMR.
+- **Mục tiêu ăn** = tiêu hao cơ bản + calo tập hôm đó − thâm hụt mong muốn, không thấp hơn BMR.
+- **TDEE thích nghi**: sau 2–4 tuần, ước lượng từ lượng ăn trung bình và xu hướng cân nặng (7.700 kcal ≈ 1 kg).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Các con số chỉ mang tính tham khảo, không thay thế tư vấn y tế hoặc dinh dưỡng chuyên môn.
