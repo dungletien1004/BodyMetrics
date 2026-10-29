@@ -19,8 +19,9 @@ services:
         generateValue: true
       - key: AUTH_USERNAME
         value: admin
-      # Asked for when the Blueprint is created; used once to create the account.
+      # Generated; read it under the service's Environment tab for the first login,
+      # then change the password in Hồ sơ.
       - key: AUTH_PASSWORD
-        sync: false
+        generateValue: true
       - key: ANTHROPIC_API_KEY
         sync: false

@@ -8,11 +8,9 @@ Khuyến nghị: **Render**. Repo đã có sẵn `render.yaml`, Render tự tạ
 
 1. Đăng nhập https://dashboard.render.com bằng GitHub, cho phép Render đọc repo `BodyMetrics`.
 2. **New → Blueprint** → chọn repo `BodyMetrics` → Render đọc `render.yaml`.
-3. Render hỏi giá trị cho các biến `sync: false`:
-   - `AUTH_PASSWORD`: mật khẩu đăng nhập lần đầu (ví dụ lấy dòng `AUTH_PASSWORD` trong file `.env.production.local` trên máy).
-   - `ANTHROPIC_API_KEY`: để trống nếu chưa có.
-4. Bấm **Apply**. Render tạo service `bodymetrics` ở Singapore, ổ `/data` 1 GB, tự sinh `AUTH_SECRET` và `MCP_TOKEN`, rồi build và deploy.
-5. Địa chỉ app có dạng `https://bodymetrics-xxxx.onrender.com`. Đăng nhập bằng `admin` và mật khẩu ở bước 3, rồi đổi mật khẩu trong **Hồ sơ** nếu muốn.
+3. Render hỏi `ANTHROPIC_API_KEY`: để trống nếu chưa có.
+4. Bấm **Apply**. Render tạo service `bodymetrics` ở Singapore, ổ `/data` 1 GB, tự sinh `AUTH_SECRET`, `AUTH_PASSWORD` và `MCP_TOKEN`, rồi build và deploy.
+5. Địa chỉ app có dạng `https://bodymetrics-xxxx.onrender.com`. Mật khẩu lần đầu nằm ở service → **Environment** → `AUTH_PASSWORD`. Đăng nhập bằng `admin` và mật khẩu đó, rồi đổi mật khẩu trong **Hồ sơ**.
 
 Mỗi lần push lên nhánh `main`, Render tự build và deploy lại; dữ liệu trên ổ `/data` được giữ nguyên.
 
