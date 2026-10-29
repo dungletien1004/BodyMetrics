@@ -12,6 +12,8 @@ Personal weight-loss tracker: meals (with AI photo calorie analysis), gym/cardio
 - First run in a fresh checkout/worktree: `cp .env.example .env && npm install && npm run setup` (db push + seed)
 - `npm run dev` · `npm run typecheck` · `npm run lint` · `npm run build`
 - Schema change: edit `schema.prisma`, then `npm run db:push`. No migration files.
+- Demo data for checking charts: `npx tsx prisma/demo-data.ts --yes`; remove with `--clean` (rows tagged `[demo]`).
+- Code under `.claude/worktrees/` belongs to other sessions; it is excluded from lint, tsc and git.
 
 ## Conventions
 - **Days are local `YYYY-MM-DD` strings** (`date` columns). Use helpers in `src/lib/dates.ts`, never `toISOString()` for day keys.

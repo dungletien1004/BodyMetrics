@@ -17,6 +17,20 @@ Mở http://localhost:3000. Vào **Hồ sơ** nhập chiều cao, năm sinh, câ
 
 Để dùng tính năng phân tích ảnh món ăn và báo cáo tuần, điền `ANTHROPIC_API_KEY` trong `.env`.
 
+### Dữ liệu mẫu (tùy chọn)
+
+Muốn xem thử biểu đồ trước khi có dữ liệu thật:
+
+```bash
+npx tsx prisma/demo-data.ts --yes
+```
+
+Xóa dữ liệu mẫu (chỉ xóa các dòng có ghi chú `[demo]`):
+
+```bash
+npx tsx prisma/demo-data.ts --clean
+```
+
 ## Dùng trên điện thoại
 
 Chạy `npm run dev -- -H 0.0.0.0` rồi mở địa chỉ IP của máy tính từ điện thoại (cùng mạng Wi-Fi). Có thể "Thêm vào màn hình chính" để dùng như app.
