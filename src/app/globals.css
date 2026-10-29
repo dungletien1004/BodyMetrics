@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --foreground: #14171c;
+  --muted: #5d6673;
+  --border: #e2e5ea;
+  --accent: #0f9f6e;
+  --accent-fg: #ffffff;
+  --intake: #e8833a;
+  --burn: #2f7dd1;
+  --protein: #c2417a;
+  --carb: #d9a326;
+  --fat: #7a5cc7;
+  --danger: #d33f3f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0e1115;
+    --surface: #171b21;
+    --surface-2: #1f242c;
+    --foreground: #e8ebef;
+    --muted: #98a1ad;
+    --border: #2a3039;
+    --accent: #2bbf8a;
+    --accent-fg: #06130e;
+    --intake: #f0975a;
+    --burn: #5a9be3;
+    --protein: #df6a9c;
+    --carb: #e7bb4b;
+    --fat: #9a80e0;
+    --danger: #ef6464;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-intake: var(--intake);
+  --color-burn: var(--burn);
+  --color-protein: var(--protein);
+  --color-carb: var(--carb);
+  --color-fat: var(--fat);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-body);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}

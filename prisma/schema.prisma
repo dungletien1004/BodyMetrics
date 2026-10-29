@@ -1,0 +1,139 @@
+// BodyMetrics data model. Local SQLite, single user.
+// Apply changes with `npm run db:push` (no migration files).
+// Dates that represent a "day" are stored as local "YYYY-MM-DD" strings (see src/lib/dates.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Singleton row (id = 1).
+model Profile {
+  id             Int      @id @default(1)
+  name           String   @default("")
+  sex            String   @default("male") // male | female
+  birthYear      Int      @default(1995)
+  heightCm       Float    @default(170)
+  // Multiplier on BMR for everyday movement only; logged workouts are added on top.
+  activityFactor Float    @default(1.2)
+  startWeightKg  Float?
+  goalWeightKg   Float?
+  dailyDeficit   Int      @default(500)
+  proteinPerKg   Float    @default(1.8)
+  updatedAt      DateTime @updatedAt
+}
+
+model BodyLog {
+  id         String   @id @default(cuid())
+  date       String
+  weightKg   Float?
+  waistCm    Float?
+  bodyFatPct Float?
+  note       String?
+  createdAt  DateTime @default(now())
+  photos     Photo[]
+
+  @@index([date])
+}
+
+model Photo {
+  id        String   @id @default(cuid())
+  kind      String // food | body
+  path      String // relative to UPLOAD_DIR, served at /api/uploads/<path>
+  width     Int
+  height    Int
+  date      String
+  takenAt   DateTime @default(now())
+  mealId    String?
+  meal      Meal?    @relation(fields: [mealId], references: [id], onDelete: SetNull)
+  bodyLogId String?
+  bodyLog   BodyLog? @relation(fields: [bodyLogId], references: [id], onDelete: SetNull)
+
+  @@index([date, kind])
+}
+
+model Meal {
+  id        String     @id @default(cuid())
+  date      String
+  type      String // breakfast | lunch | dinner | snack
+  eatenAt   DateTime   @default(now())
+  note      String?
+  aiRaw     String? // raw JSON returned by the photo analysis, kept for auditing
+  createdAt DateTime   @default(now())
+  items     MealItem[]
+  photos    Photo[]
+
+  @@index([date])
+}
+
+model MealItem {
+  id         String  @id @default(cuid())
+  mealId     String
+  meal       Meal    @relation(fields: [mealId], references: [id], onDelete: Cascade)
+  name       String
+  portionG   Float?
+  kcal       Float
+  proteinG   Float   @default(0)
+  carbG      Float   @default(0)
+  fatG       Float   @default(0)
+  source     String  @default("manual") // manual | ai
+  confidence Float? // 0..1, AI only
+}
+
+model Exercise {
+  id          String         @id @default(cuid())
+  name        String         @unique
+  category    String // strength | cardio | hiit | other
+  met         Float
+  muscleGroup String?
+  entries     WorkoutEntry[]
+}
+
+model Workout {
+  id           String         @id @default(cuid())
+  date         String
+  startedAt    DateTime       @default(now())
+  durationMin  Int
+  note         String?
+  // Set when a smartwatch gives a better number; replaces the MET estimate.
+  kcalOverride Float?
+  createdAt    DateTime       @default(now())
+  entries      WorkoutEntry[]
+
+  @@index([date])
+}
+
+model WorkoutEntry {
+  id          String       @id @default(cuid())
+  workoutId   String
+  workout     Workout      @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  exerciseId  String
+  exercise    Exercise     @relation(fields: [exerciseId], references: [id])
+  order       Int          @default(0)
+  durationMin Float // active minutes used for the MET estimate
+  intensity   String       @default("moderate") // light | moderate | vigorous
+  distanceKm  Float?
+  kcal        Float // net kcal, computed with exerciseKcal() at save time
+  sets        WorkoutSet[]
+}
+
+model WorkoutSet {
+  id       String       @id @default(cuid())
+  entryId  String
+  entry    WorkoutEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  setNo    Int
+  reps     Int?
+  weightKg Float?
+}
+
+model WeeklyReport {
+  id        String   @id @default(cuid())
+  weekStart String   @unique // Monday, YYYY-MM-DD
+  stats     String // JSON snapshot of the numbers the report was written from
+  content   String // markdown written by the AI
+  createdAt DateTime @default(now())
+}
