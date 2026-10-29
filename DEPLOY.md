@@ -1,53 +1,52 @@
 # Deploy BodyMetrics lên web
 
-App chạy bằng Docker. Dữ liệu (database SQLite và ảnh) nằm trong thư mục `/data`, nên nơi chạy phải có **ổ lưu trữ cố định (volume)** gắn vào `/data`. Không có volume thì mỗi lần deploy lại sẽ mất hết dữ liệu.
+App chạy bằng Docker. Dữ liệu (database SQLite và ảnh) nằm trong thư mục `/data`, nên nơi chạy phải có **ổ lưu trữ cố định (disk/volume)** gắn vào `/data`. Không có ổ này thì mỗi lần deploy lại sẽ mất hết dữ liệu.
 
-Khuyến nghị: **Railway** (khoảng 5 USD/tháng, có volume, HTTPS và tên miền miễn phí).
+Khuyến nghị: **Render**. Repo đã có sẵn `render.yaml`, Render tự tạo service, ổ đĩa và biến môi trường. Chi phí khoảng 7 USD/tháng (gói Starter, bắt buộc để có ổ đĩa) cộng 0,25 USD/GB ổ đĩa.
 
-## 1. Biến môi trường
+## 1. Render (Blueprint)
 
-File `.env.production.local` trong máy đã có sẵn giá trị ngẫu nhiên cho bạn (file này không được commit). Đặt các biến sau ở nơi deploy:
+1. Đăng nhập https://dashboard.render.com bằng GitHub, cho phép Render đọc repo `BodyMetrics`.
+2. **New → Blueprint** → chọn repo `BodyMetrics` → Render đọc `render.yaml`.
+3. Render hỏi giá trị cho các biến `sync: false`:
+   - `AUTH_PASSWORD`: mật khẩu đăng nhập lần đầu (ví dụ lấy dòng `AUTH_PASSWORD` trong file `.env.production.local` trên máy).
+   - `ANTHROPIC_API_KEY`: để trống nếu chưa có.
+4. Bấm **Apply**. Render tạo service `bodymetrics` ở Singapore, ổ `/data` 1 GB, tự sinh `AUTH_SECRET` và `MCP_TOKEN`, rồi build và deploy.
+5. Địa chỉ app có dạng `https://bodymetrics-xxxx.onrender.com`. Đăng nhập bằng `admin` và mật khẩu ở bước 3, rồi đổi mật khẩu trong **Hồ sơ** nếu muốn.
+
+Mỗi lần push lên nhánh `main`, Render tự build và deploy lại; dữ liệu trên ổ `/data` được giữ nguyên.
+
+## 2. Biến môi trường
 
 | Biến | Ý nghĩa |
 |---|---|
-| `AUTH_SECRET` | Khóa ký cookie đăng nhập, 32+ ký tự ngẫu nhiên |
+| `AUTH_SECRET` | Khóa ký cookie đăng nhập, 32+ ký tự ngẫu nhiên (Render tự sinh) |
 | `AUTH_USERNAME`, `AUTH_PASSWORD` | Tài khoản được tạo ở lần đăng nhập đầu tiên. Sau đó đổi mật khẩu trong **Hồ sơ** |
-| `MCP_TOKEN` | Phần bí mật trong URL connector cho Claude |
-| `TZ` | `Asia/Ho_Chi_Minh` (đã đặt sẵn trong image) |
+| `MCP_TOKEN` | Phần bí mật trong URL connector cho Claude (Render tự sinh) |
 | `ANTHROPIC_API_KEY` | Tùy chọn, để phân tích ảnh ngay trong app |
 
-`DATABASE_URL`, `UPLOAD_DIR`, `PORT` đã có mặc định trong image, không cần đặt.
-
-## 2. Railway
-
-1. Đăng nhập https://railway.com bằng GitHub.
-2. **New Project → Deploy from GitHub repo** → chọn repo `BodyMetrics`. Railway tự nhận `Dockerfile`.
-3. Trong service: **Settings → Volumes → Add Volume**, mount path `/data`.
-4. **Variables**: dán các dòng từ `.env.production.local`.
-5. **Settings → Networking → Generate Domain** để có địa chỉ `https://...up.railway.app`.
-6. **Settings → Deploy → Healthcheck Path**: `/api/health`.
-
-Mỗi lần push lên nhánh `main`, Railway tự build và deploy lại; dữ liệu trong volume được giữ nguyên.
+`DATABASE_URL`, `UPLOAD_DIR`, `PORT` và `TZ=Asia/Ho_Chi_Minh` đã có mặc định trong image.
 
 ## 3. Kết nối với Claude (claude.ai)
 
-1. Trên claude.ai: **Settings → Connectors → Add custom connector**.
-2. Tên: `BodyMetrics`. URL: `https://<tên-miền-của-bạn>/api/mcp/<MCP_TOKEN>`.
-3. Trong cuộc trò chuyện, bật connector BodyMetrics, gửi ảnh bữa ăn hoặc ảnh buổi tập và nói ví dụ "ghi bữa trưa này". Claude sẽ phân tích và lưu vào app, rồi báo lại lượng calo còn lại trong ngày.
+1. Trên Render, mở service → **Environment** → xem giá trị `MCP_TOKEN`.
+2. Trên claude.ai: **Settings → Connectors → Add custom connector**.
+3. Tên: `BodyMetrics`. URL: `https://<địa-chỉ-app>/api/mcp/<MCP_TOKEN>` (dán nguyên token, kể cả dấu `/`, `+`, `=` nếu có).
+4. Trong cuộc trò chuyện, bật connector BodyMetrics, gửi ảnh bữa ăn hoặc ảnh buổi tập và nói ví dụ "ghi bữa trưa này". Claude sẽ phân tích, lưu vào app và báo lại lượng calo còn lại trong ngày.
 
-Coi toàn bộ URL connector như mật khẩu: ai có URL đều ghi được dữ liệu. Muốn thu hồi, đổi `MCP_TOKEN` rồi cập nhật lại URL trong claude.ai.
+Coi toàn bộ URL connector như mật khẩu: ai có URL đều ghi được dữ liệu. Muốn thu hồi, đổi `MCP_TOKEN` trên Render rồi cập nhật lại URL trong claude.ai.
 
-## Nơi khác (Fly.io, VPS…)
+## Nơi khác (Railway, Fly.io, VPS…)
 
-Bất kỳ nơi nào chạy được Docker và có volume:
+Bất kỳ nơi nào chạy được Docker và có volume gắn vào `/data`:
 
 ```bash
 docker build -t bodymetrics .
 docker run -d -p 3000:3000 -v bodymetrics-data:/data --env-file .env.production.local bodymetrics
 ```
 
-Cần đặt app sau HTTPS (cookie đăng nhập chỉ gửi qua HTTPS khi chạy production). Chỉ để thử qua `http://` thì thêm `AUTH_INSECURE_COOKIE=1`.
+File `.env.production.local` trên máy đã có sẵn các giá trị ngẫu nhiên. Cần đặt app sau HTTPS (cookie đăng nhập chỉ gửi qua HTTPS khi chạy production). Chỉ để thử qua `http://` thì thêm `AUTH_INSECURE_COOKIE=1`.
 
 ## Sao lưu
 
-Sao lưu thư mục `/data` (file `bodymetrics.db` và thư mục `uploads/`). Trên Railway có thể bật backup cho volume.
+Sao lưu thư mục `/data` (file `bodymetrics.db` và thư mục `uploads/`). Render tự chụp snapshot ổ đĩa mỗi ngày và giữ 7 ngày.
