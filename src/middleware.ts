@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { readSession, SESSION_COOKIE } from "@/lib/auth/session";
 
 // Paths reachable without a session. /api/mcp authenticates with its own token.
-const PUBLIC = [/^\/login(\/|$)/, /^\/api\/mcp(\/|$)/];
+const PUBLIC = [/^\/login(\/|$)/, /^\/api\/mcp(\/|$)/, /^\/api\/health$/];
 
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;

@@ -13,7 +13,9 @@ npm run setup
 npm run dev
 ```
 
-Mở http://localhost:3000. Vào **Hồ sơ** nhập chiều cao, năm sinh, cân nặng và mục tiêu trước.
+Trước khi chạy, điền `AUTH_SECRET` (chuỗi ngẫu nhiên 32+ ký tự), `AUTH_USERNAME` và `AUTH_PASSWORD` trong `.env`. Tài khoản này được tạo ở lần đăng nhập đầu tiên; sau đó đổi mật khẩu trong **Hồ sơ**, hoặc dùng `npm run user:set -- <tên> <mật-khẩu>`.
+
+Mở http://localhost:3000, đăng nhập, rồi vào **Hồ sơ** nhập chiều cao, năm sinh, cân nặng và mục tiêu.
 
 Để dùng tính năng phân tích ảnh món ăn và báo cáo tuần, điền `ANTHROPIC_API_KEY` trong `.env`.
 
@@ -34,6 +36,10 @@ npx tsx prisma/demo-data.ts --clean
 ## Dùng trên điện thoại
 
 Chạy `npm run dev -- -H 0.0.0.0` rồi mở địa chỉ IP của máy tính từ điện thoại (cùng mạng Wi-Fi). Có thể "Thêm vào màn hình chính" để dùng như app.
+
+## Deploy và kết nối với Claude
+
+Xem [DEPLOY.md](DEPLOY.md): chạy bằng Docker trên Railway (hoặc host bất kỳ có volume), rồi thêm BodyMetrics làm connector trong claude.ai. Khi đó bạn gửi ảnh bữa ăn hoặc buổi tập cho Claude bằng tài khoản Claude của mình, Claude phân tích và tự lưu vào app.
 
 ## Dữ liệu
 
