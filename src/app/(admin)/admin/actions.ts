@@ -8,6 +8,7 @@ import { hashPassword, MIN_PASSWORD_LENGTH } from "@/lib/auth/password";
 import { countOtherActiveAdmins } from "@/lib/admin";
 import { db } from "@/lib/db";
 import { USERNAME_RE } from "./password";
+import { revokeAllForUser } from "@/lib/oauth/tokens";
 
 export type AdminFormState = { ok?: string; error?: string; password?: string; username?: string; userId?: string } | null;
 
@@ -103,6 +104,7 @@ export async function resetPassword(userId: string, _prev: AdminFormState, form:
     where: { id: userId },
     data: { passwordHash: await hashPassword(password), sessionVer: { increment: 1 } },
   });
+  await revokeAllForUser(updated.id);
   // Resetting your own password here should not sign you out of this browser.
   if (updated.id === me.id) await startSession(updated);
   revalidateAdmin();
@@ -126,6 +128,7 @@ export async function setActive(userId: string, active: boolean): Promise<AdminF
     return null;
   });
   if (error) return { error };
+  if (!active) await revokeAllForUser(userId);
   revalidateAdmin();
   return { ok: active ? "Đã mở khóa tài khoản." : "Đã khóa tài khoản và đăng xuất người dùng." };
 }

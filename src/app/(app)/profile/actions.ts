@@ -6,6 +6,7 @@ import { requireUser, requireWriter, startSession } from "@/lib/auth";
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
 import { parseNum } from "@/lib/format";
+import { revokeAllForUser } from "@/lib/oauth/tokens";
 
 export type PasswordState = { ok?: string; error?: string } | null;
 
@@ -27,7 +28,8 @@ export async function changePassword(_prev: PasswordState, form: FormData): Prom
     data: { passwordHash: await hashPassword(next), sessionVer: { increment: 1 } },
   });
   await startSession(updated);
-  return { ok: "Đã đổi mật khẩu. Các thiết bị khác sẽ phải đăng nhập lại." };
+  await revokeAllForUser(updated.id);
+  return { ok: "Đã đổi mật khẩu. Các thiết bị khác và kết nối Claude sẽ phải đăng nhập lại." };
 }
 
 export async function saveProfile(form: FormData) {

@@ -1,3 +1,4 @@
+import { ClaudeConnections } from "@/components/connections/claude-connections";
 import { Button, Card, CardTitle, Field, Input, PageHeader, Select, Stat } from "@/components/ui";
 import { ageFrom, baselineTdee, bmi, bmr, proteinTarget, weeksToGoal } from "@/lib/calc";
 import { todayKey } from "@/lib/dates";
@@ -94,6 +95,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: Prom
           </Card>
         )}
       </div>
+      <ClaudeConnections />
     </>
   );
 }
