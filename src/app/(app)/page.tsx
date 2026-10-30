@@ -8,6 +8,7 @@ import { formatDayLong, parseDay, shiftDay, todayKey } from "@/lib/dates";
 import { kcal, num, signed } from "@/lib/format";
 import { uploadUrl } from "@/lib/storage";
 import { getDaySummaries, getProfile } from "@/lib/summary";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -16,17 +17,18 @@ const WEEKDAY = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 
 export default async function DashboardPage() {
   const today = todayKey();
+  const { userId } = await getViewer();
   const [profile, week, series, meals, workouts] = await Promise.all([
-    getProfile(),
-    getDaySummaries(shiftDay(today, -6), today),
-    getWeightSeries(30),
+    getProfile(userId),
+    getDaySummaries(userId, shiftDay(today, -6), today),
+    getWeightSeries(userId, 30),
     db.meal.findMany({
-      where: { date: today },
+      where: { userId, date: today },
       orderBy: { eatenAt: "asc" },
       include: { items: { select: { kcal: true, name: true } }, photos: { take: 1 } },
     }),
     db.workout.findMany({
-      where: { date: today },
+      where: { userId, date: today },
       orderBy: { startedAt: "asc" },
       include: { entries: { select: { kcal: true, exercise: { select: { name: true } } } } },
     }),

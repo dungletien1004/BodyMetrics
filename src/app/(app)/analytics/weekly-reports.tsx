@@ -9,11 +9,11 @@ import { ReportButton } from "./report-button";
 
 const weekLabel = (ws: string) => `${formatDayShort(ws)}–${formatDayShort(shiftDay(ws, 6))}`;
 
-export async function WeeklyReports() {
-  const reports = await db.weeklyReport.findMany({ orderBy: { weekStart: "desc" }, take: 26 });
+export async function WeeklyReports({ userId, readOnly = false }: { userId: string; readOnly?: boolean }) {
+  const reports = await db.weeklyReport.findMany({ where: { userId }, orderBy: { weekStart: "desc" }, take: 26 });
   const lastWeek = shiftDay(weekStartKey(todayKey()), -7);
   const hasLastWeek = reports.some((r) => r.weekStart === lastWeek);
-  const aiReady = hasAiKey();
+  const aiReady = hasAiKey() && !readOnly;
 
   return (
     <Card>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, Dumbbell, Images, LayoutDashboard, LogOut, Scale, User, Utensils } from "lucide-react";
+import { Activity, BarChart3, Dumbbell, Images, LayoutDashboard, LogOut, Scale, ShieldCheck, User, Utensils } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/login/actions";
@@ -23,7 +23,7 @@ function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
-export function SideNav({ username }: { username: string }) {
+export function SideNav({ username, isAdmin }: { username: string; isAdmin: boolean }) {
   const pathname = usePathname();
   return (
     <nav className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col border-r border-border bg-surface px-3 py-5 md:flex">
@@ -44,6 +44,16 @@ export function SideNav({ username }: { username: string }) {
             </Link>
           </li>
         ))}
+        {isAdmin && (
+          <li>
+            <Link
+              href="/admin"
+              className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted transition hover:bg-surface-2 hover:text-foreground"
+            >
+              <ShieldCheck className="size-4" /> Quản trị
+            </Link>
+          </li>
+        )}
       </ul>
       <form action={logout} className="mt-auto flex items-center justify-between gap-2 border-t border-border px-3 pt-4">
         <span className="truncate text-sm text-muted">{username}</span>
@@ -78,13 +88,18 @@ export function MobileNav() {
   );
 }
 
-export function MobileTopBar() {
+export function MobileTopBar({ isAdmin }: { isAdmin: boolean }) {
   return (
     <header className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-surface/95 px-4 py-3 backdrop-blur md:hidden">
       <Link href="/" className="flex items-center gap-2 font-semibold">
         <Activity className="size-5 text-accent" /> BodyMetrics
       </Link>
       <div className="flex gap-1">
+        {isAdmin && (
+          <Link href="/admin" aria-label="Quản trị" className="rounded-lg p-2 text-muted hover:bg-surface-2">
+            <ShieldCheck className="size-5" />
+          </Link>
+        )}
         <Link href="/gallery" aria-label="Ảnh" className="rounded-lg p-2 text-muted hover:bg-surface-2">
           <Images className="size-5" />
         </Link>

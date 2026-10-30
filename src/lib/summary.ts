@@ -3,18 +3,21 @@ import { db } from "./db";
 import { baselineTdee, bmr, intakeTarget, proteinTarget, type EnergyProfile } from "./calc";
 import { dayRange } from "./dates";
 
-export async function getProfile() {
-  return db.profile.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
+// Every function here takes the id of the user whose data to read (see getViewer in lib/auth).
+
+/** The user's profile, created with defaults on first use. */
+export async function getProfile(userId: string) {
+  return db.profile.upsert({ where: { userId }, update: {}, create: { userId } });
 }
 
 /** Most recent weight on or before `day`, falling back to the profile's start weight, then 70 kg. */
-export async function getWeightOn(day: string): Promise<number> {
+export async function getWeightOn(userId: string, day: string): Promise<number> {
   const log = await db.bodyLog.findFirst({
-    where: { date: { lte: day }, weightKg: { not: null } },
+    where: { userId, date: { lte: day }, weightKg: { not: null } },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   });
   if (log?.weightKg) return log.weightKg;
-  const profile = await getProfile();
+  const profile = await getProfile(userId);
   return profile.startWeightKg ?? 70;
 }
 
@@ -38,31 +41,31 @@ export interface DaySummary {
 }
 
 /** Per-day totals for an inclusive range of day keys, oldest first. */
-export async function getDaySummaries(from: string, to: string): Promise<DaySummary[]> {
-  const profile: EnergyProfile = await getProfile();
+export async function getDaySummaries(userId: string, from: string, to: string): Promise<DaySummary[]> {
+  const profile: EnergyProfile & { startWeightKg: number | null } = await getProfile(userId);
   const [items, meals, workouts, bodyLogs, priorLog] = await Promise.all([
     db.mealItem.findMany({
-      where: { meal: { date: { gte: from, lte: to } } },
+      where: { meal: { userId, date: { gte: from, lte: to } } },
       select: { kcal: true, proteinG: true, carbG: true, fatG: true, meal: { select: { date: true } } },
     }),
-    db.meal.groupBy({ by: ["date"], where: { date: { gte: from, lte: to } }, _count: true }),
+    db.meal.groupBy({ by: ["date"], where: { userId, date: { gte: from, lte: to } }, _count: true }),
     db.workout.findMany({
-      where: { date: { gte: from, lte: to } },
+      where: { userId, date: { gte: from, lte: to } },
       select: { date: true, kcalOverride: true, entries: { select: { kcal: true } } },
     }),
     db.bodyLog.findMany({
-      where: { date: { gte: from, lte: to }, weightKg: { not: null } },
+      where: { userId, date: { gte: from, lte: to }, weightKg: { not: null } },
       orderBy: [{ date: "asc" }, { createdAt: "asc" }],
       select: { date: true, weightKg: true },
     }),
     db.bodyLog.findFirst({
-      where: { date: { lt: from }, weightKg: { not: null } },
+      where: { userId, date: { lt: from }, weightKg: { not: null } },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       select: { weightKg: true },
     }),
   ]);
 
-  const fallbackWeight = priorLog?.weightKg ?? bodyLogs[0]?.weightKg ?? (await getProfile()).startWeightKg ?? 70;
+  const fallbackWeight = priorLog?.weightKg ?? bodyLogs[0]?.weightKg ?? profile.startWeightKg ?? 70;
   const weightByDay = new Map<string, number>();
   for (const l of bodyLogs) weightByDay.set(l.date, l.weightKg!); // last log of the day wins
 
@@ -103,6 +106,6 @@ export async function getDaySummaries(from: string, to: string): Promise<DaySumm
   });
 }
 
-export async function getDaySummary(date: string): Promise<DaySummary> {
-  return (await getDaySummaries(date, date))[0];
+export async function getDaySummary(userId: string, date: string): Promise<DaySummary> {
+  return (await getDaySummaries(userId, date, date))[0];
 }

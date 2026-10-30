@@ -79,13 +79,16 @@ function loggingStreak(days: DaySummary[]): number {
   return n;
 }
 
-export async function getAnalytics(weeks: RangeWeeks): Promise<Analytics> {
+export async function getAnalytics(userId: string, weeks: RangeWeeks): Promise<Analytics> {
   const today = todayKey();
   const from = shiftDay(weekStartKey(today), -7 * (weeks - 1));
   // Fetch extra history so the moving average, streak and adaptive TDEE have context.
   const lookback = Math.max(90, weeks * 7 + 35);
   const fetchFrom = shiftDay(today, -lookback);
-  const [profile, all] = await Promise.all([getProfile(), getDaySummaries(fetchFrom < from ? fetchFrom : from, today)]);
+  const [profile, all] = await Promise.all([
+    getProfile(userId),
+    getDaySummaries(userId, fetchFrom < from ? fetchFrom : from, today),
+  ]);
 
   const ma = movingAverage(all.map((d) => d.loggedWeightKg));
   const startIdx = all.findIndex((d) => d.date === from);

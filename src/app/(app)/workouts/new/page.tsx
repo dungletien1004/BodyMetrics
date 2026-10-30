@@ -4,6 +4,7 @@ import { isDayKey, todayKey } from "@/lib/dates";
 import { getWeightOn } from "@/lib/summary";
 import { payloadFromWorkout, timeOfDay, type WorkoutPayload } from "@/lib/workouts";
 import { getExerciseOptions, getWorkout } from "../queries";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +14,13 @@ export default async function NewWorkoutPage({ searchParams }: { searchParams: P
   const startTime = timeOfDay(new Date());
 
   // "Lặp lại buổi này": copy exercises, sets and settings onto the chosen day (today by default).
-  const source = sp.from ? await getWorkout(sp.from) : null;
+  const { userId } = await getViewer();
+  const source = sp.from ? await getWorkout(userId, sp.from) : null;
   const initial: WorkoutPayload = source
     ? payloadFromWorkout(source, { date, startTime, kcalOverride: null, note: "" }) // watch reading and note belong to the original
     : { date, startTime, durationMin: null, kcalOverride: null, note: "", entries: [] };
 
-  const [exercises, weight] = await Promise.all([getExerciseOptions(), getWeightOn(date)]);
+  const [exercises, weight] = await Promise.all([getExerciseOptions(userId), getWeightOn(userId, date)]);
 
   return (
     <>

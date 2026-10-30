@@ -6,6 +6,7 @@ import { dayRange, formatDayLong, formatDayShort, isDayKey, shiftDay, todayKey, 
 import { kcal, num } from "@/lib/format";
 import { setsSummary, setsVolume, timeOfDay, workoutKcal } from "@/lib/workouts";
 import { getWorkoutsBetween } from "./queries";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,8 @@ export default async function WorkoutsPage({ searchParams }: { searchParams: Pro
   const week = weekStartKey(isDayKey(sp.week) ? sp.week : today);
   const end = shiftDay(week, 6);
   const thisWeek = weekStartKey(today);
-  const workouts = await getWorkoutsBetween(week, end);
+  const { userId } = await getViewer();
+  const workouts = await getWorkoutsBetween(userId, week, end);
 
   const entries = workouts.flatMap((w) => w.entries);
   const totals = {

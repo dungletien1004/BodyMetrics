@@ -9,6 +9,7 @@ import { formatDayLong, formatDayShort, todayKey } from "@/lib/dates";
 import { num, signed } from "@/lib/format";
 import { uploadUrl } from "@/lib/storage";
 import { getProfile } from "@/lib/summary";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +20,12 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
   const days = RANGES.includes(Number(sp.days)) ? Number(sp.days) : 90;
   const today = todayKey();
 
+  const { userId } = await getViewer();
   const [profile, series, logs, bodyPhotos] = await Promise.all([
-    getProfile(),
-    getWeightSeries(days),
-    db.bodyLog.findMany({ orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 60, include: { photos: true } }),
-    db.photo.findMany({ where: { kind: "body" }, orderBy: [{ date: "asc" }, { takenAt: "asc" }] }),
+    getProfile(userId),
+    getWeightSeries(userId, days),
+    db.bodyLog.findMany({ where: { userId }, orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 60, include: { photos: true } }),
+    db.photo.findMany({ where: { userId, kind: "body" }, orderBy: [{ date: "asc" }, { takenAt: "asc" }] }),
   ]);
 
   const current = series.latestAvg ?? series.latest;

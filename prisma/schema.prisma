@@ -1,5 +1,6 @@
-// BodyMetrics data model. Postgres (Neon in production, Docker locally), single user.
-// Apply changes with `npm run db:push` (no migration files).
+// BodyMetrics data model. Postgres (Neon in production, Docker locally).
+// Multi-user: every row of personal data belongs to a User; admins manage users and can view their data.
+// Apply changes with `npm run db:push` (runs prisma/pre-push.ts first, no migration files).
 // Dates that represent a "day" are stored as local "YYYY-MM-DD" strings (see src/lib/dates.ts).
 
 generator client {
@@ -13,27 +14,45 @@ datasource db {
   directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
-// Photo bytes (WebP), kept in the database so the app needs no disk.
-model ImageBlob {
-  id        String   @id @default(cuid())
-  mime      String   @default("image/webp")
-  data      Bytes
-  createdAt DateTime @default(now())
-}
-
-// Login account. Created from AUTH_USERNAME / AUTH_PASSWORD on first login, or with `npm run user:create`.
+// Login account. The first one comes from AUTH_USERNAME / AUTH_PASSWORD and is an admin;
+// admins create the others in /admin, or use `npm run user:set`.
 model User {
   id           String   @id @default(cuid())
   username     String   @unique
+  name         String   @default("")
+  role         String   @default("user") // admin | user
+  active       Boolean  @default(true) // inactive users cannot sign in
   passwordHash String // scrypt, see src/lib/auth/password.ts
-  // Bumped on password change; sessions carrying an older value are rejected.
+  // Bumped on password change or deactivation; sessions carrying an older value are rejected.
   sessionVer   Int      @default(1)
   createdAt    DateTime @default(now())
+
+  profile       Profile?
+  bodyLogs      BodyLog[]
+  photos        Photo[]
+  images        ImageBlob[]
+  meals         Meal[]
+  workouts      Workout[]
+  exercises     Exercise[]
+  weeklyReports WeeklyReport[]
 }
 
-// Singleton row (id = 1).
+// Photo bytes (WebP), kept in the database so the app needs no disk.
+model ImageBlob {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mime      String   @default("image/webp")
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// One per user, created on first use.
 model Profile {
-  id             Int      @id @default(1)
+  userId         String   @id
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name           String   @default("")
   sex            String   @default("male") // male | female
   birthYear      Int      @default(1995)
@@ -49,6 +68,8 @@ model Profile {
 
 model BodyLog {
   id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   date       String
   weightKg   Float?
   waistCm    Float?
@@ -57,11 +78,13 @@ model BodyLog {
   createdAt  DateTime @default(now())
   photos     Photo[]
 
-  @@index([date])
+  @@index([userId, date])
 }
 
 model Photo {
   id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   kind      String // food | body
   path      String // ImageBlob id, served at /api/uploads/<path>
   width     Int
@@ -73,11 +96,13 @@ model Photo {
   bodyLogId String?
   bodyLog   BodyLog? @relation(fields: [bodyLogId], references: [id], onDelete: SetNull)
 
-  @@index([date, kind])
+  @@index([userId, date, kind])
 }
 
 model Meal {
   id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   date      String
   type      String // breakfast | lunch | dinner | snack
   eatenAt   DateTime   @default(now())
@@ -87,7 +112,7 @@ model Meal {
   items     MealItem[]
   photos    Photo[]
 
-  @@index([date])
+  @@index([userId, date])
 }
 
 model MealItem {
@@ -104,17 +129,24 @@ model MealItem {
   confidence Float? // 0..1, AI only
 }
 
+// userId null = shared library (seeded); otherwise a user's own custom exercise.
 model Exercise {
   id          String         @id @default(cuid())
-  name        String         @unique
+  userId      String?
+  user        User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
   category    String // strength | cardio | hiit | other
   met         Float
   muscleGroup String?
   entries     WorkoutEntry[]
+
+  @@index([userId, name])
 }
 
 model Workout {
   id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   date         String
   startedAt    DateTime       @default(now())
   durationMin  Int
@@ -124,7 +156,7 @@ model Workout {
   createdAt    DateTime       @default(now())
   entries      WorkoutEntry[]
 
-  @@index([date])
+  @@index([userId, date])
 }
 
 model WorkoutEntry {
@@ -152,8 +184,12 @@ model WorkoutSet {
 
 model WeeklyReport {
   id        String   @id @default(cuid())
-  weekStart String   @unique // Monday, YYYY-MM-DD
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekStart String // Monday, YYYY-MM-DD
   stats     String // JSON snapshot of the numbers the report was written from
-  content   String // markdown written by the AI
+  content   String // JSON written by the AI
   createdAt DateTime @default(now())
+
+  @@unique([userId, weekStart])
 }

@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { kcal, num } from "@/lib/format";
 import { uploadUrl } from "@/lib/storage";
 import { getDaySummary } from "@/lib/summary";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +19,11 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
   const today = todayKey();
   const date = isDayKey(dateParam) ? dateParam : today;
 
+  const { userId } = await getViewer();
   const [summary, meals] = await Promise.all([
-    getDaySummary(date),
+    getDaySummary(userId, date),
     db.meal.findMany({
-      where: { date },
+      where: { userId, date },
       orderBy: { eatenAt: "asc" },
       include: { items: true, photos: { orderBy: { takenAt: "asc" }, take: 1 } },
     }),

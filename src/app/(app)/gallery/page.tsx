@@ -3,6 +3,7 @@ import { Card, EmptyState, PageHeader, cn } from "@/components/ui";
 import { db } from "@/lib/db";
 import { formatDayLong } from "@/lib/dates";
 import { uploadUrl } from "@/lib/storage";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +20,9 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
   const kind = KINDS.some((k) => k.value === sp.kind) ? sp.kind! : "all";
   const page = Math.max(1, Number(sp.page) || 1);
 
+  const { userId } = await getViewer();
   // Food photos only count once their meal is saved; unsaved uploads are cleaned up later.
-  const linked = { OR: [{ kind: "body" }, { mealId: { not: null } }] };
+  const linked = { userId, OR: [{ kind: "body" }, { mealId: { not: null } }] };
   const where = kind === "all" ? linked : { AND: [linked, { kind }] };
   const [photos, total] = await Promise.all([
     db.photo.findMany({

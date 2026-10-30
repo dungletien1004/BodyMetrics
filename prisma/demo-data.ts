@@ -3,6 +3,7 @@
 //   npx tsx prisma/demo-data.ts --yes             insert demo rows (refuses without --yes)
 //   npx tsx prisma/demo-data.ts --yes --set-goal  also fill the profile's start/goal weight if empty
 //   npx tsx prisma/demo-data.ts --clean           delete every row tagged "[demo]"
+//   add --user=<username> to target that account (default: the first admin)
 //
 // Only inserts. Every inserted Meal / Workout / BodyLog has a note starting with "[demo]".
 import { PrismaClient } from "@prisma/client";
@@ -12,6 +13,7 @@ import { dayRange, shiftDay, todayKey } from "../src/lib/dates";
 const db = new PrismaClient();
 const TAG = "[demo]";
 const WEEKS = 8;
+let USER_ID = ""; // whose data, resolved in main()
 const START_KG = 86;
 const KG_PER_WEEK = -0.4;
 
@@ -94,6 +96,7 @@ function scale(food: Food, k: number): Food {
 async function insertMeal(day: string, type: string, time: Date, foods: Food[]) {
   await db.meal.create({
     data: {
+      userId: USER_ID,
       date: day,
       type,
       eatenAt: time,
@@ -106,12 +109,12 @@ async function insertMeal(day: string, type: string, time: Date, foods: Food[]) 
 }
 
 async function seed(setGoal: boolean) {
-  const existing = await db.meal.count({ where: { note: { startsWith: TAG } } });
+  const existing = await db.meal.count({ where: { userId: USER_ID, note: { startsWith: TAG } } });
   if (existing > 0) {
     console.log(`Đã có ${existing} bữa ăn demo. Chạy với --clean trước nếu muốn tạo lại.`);
     return;
   }
-  const exercises = new Map((await db.exercise.findMany()).map((e) => [e.name, e]));
+  const exercises = new Map((await db.exercise.findMany({ where: { userId: null } })).map((e) => [e.name, e]));
   if (exercises.size === 0) throw new Error("Exercise library is empty - run `npm run setup` first.");
 
   const today = todayKey();
@@ -130,7 +133,7 @@ async function seed(setGoal: boolean) {
 
     if (chance(0.82) || i === days.length - 1) {
       await db.bodyLog.create({
-        data: { date: day, weightKg, waistCm: i % 7 === 0 ? Math.round((96 - i * 0.07) * 10) / 10 : null, note: TAG, createdAt: at(day, 6, 45) },
+        data: { userId: USER_ID, date: day, weightKg, waistCm: i % 7 === 0 ? Math.round((96 - i * 0.07) * 10) / 10 : null, note: TAG, createdAt: at(day, 6, 45) },
       });
       weighIns++;
     }
@@ -165,6 +168,7 @@ async function seed(setGoal: boolean) {
       const intensity: Intensity = chance(0.3) ? "vigorous" : "moderate";
       await db.workout.create({
         data: {
+          userId: USER_ID,
           date: day,
           startedAt: at(day, 18, 0),
           durationMin: 60,
@@ -198,6 +202,7 @@ async function seed(setGoal: boolean) {
       const minutes = 30 + Math.floor(rand() * 4) * 5;
       await db.workout.create({
         data: {
+          userId: USER_ID,
           date: day,
           startedAt: at(day, 7, 30),
           durationMin: minutes,
@@ -220,10 +225,10 @@ async function seed(setGoal: boolean) {
   }
 
   if (setGoal) {
-    const p = await db.profile.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
+    const p = await db.profile.upsert({ where: { userId: USER_ID }, update: {}, create: { userId: USER_ID } });
     if (p.startWeightKg == null || p.goalWeightKg == null) {
       await db.profile.update({
-        where: { id: 1 },
+        where: { userId: USER_ID },
         data: { startWeightKg: p.startWeightKg ?? START_KG, goalWeightKg: p.goalWeightKg ?? 78 },
       });
       console.log("Đã điền cân nặng ban đầu / mục tiêu còn trống trong hồ sơ.");
@@ -234,7 +239,7 @@ async function seed(setGoal: boolean) {
 }
 
 async function clean() {
-  const where = { note: { startsWith: TAG } };
+  const where = { userId: USER_ID, note: { startsWith: TAG } };
   const [meals, workouts, logs] = await db.$transaction([
     db.meal.deleteMany({ where }),
     db.workout.deleteMany({ where }),
@@ -244,7 +249,19 @@ async function clean() {
 }
 
 async function main() {
-  const args = new Set(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const args = new Set(argv);
+  const username = argv.find((a) => a.startsWith("--user="))?.slice("--user=".length);
+  const user = username
+    ? await db.user.findUnique({ where: { username } })
+    : await db.user.findFirst({ where: { role: "admin" }, orderBy: { createdAt: "asc" } });
+  if (!user) {
+    console.error(username ? `Không có tài khoản "${username}".` : "Chưa có tài khoản admin nào. Đăng nhập lần đầu để tạo.");
+    process.exitCode = 1;
+    return;
+  }
+  USER_ID = user.id;
+  console.log(`Tài khoản: ${user.username}`);
   if (args.has("--clean")) return clean();
   if (!args.has("--yes")) {
     console.error("Script này chèn dữ liệu demo vào DB hiện tại. Chạy lại với --yes để xác nhận (hoặc --clean để xoá).");

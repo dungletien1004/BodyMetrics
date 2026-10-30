@@ -54,6 +54,8 @@ export async function login(_prev: LoginState, form: FormData): Promise<LoginSta
     return { error: "Sai tên đăng nhập hoặc mật khẩu.", username };
   }
 
+  if (!user.active) return { error: "Tài khoản này đã bị khóa. Liên hệ quản trị viên.", username };
+
   failures.delete(ip);
   await startSession(user);
   redirect(safeNext(form.get("next")));

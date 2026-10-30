@@ -5,15 +5,17 @@ import { formatDayLong } from "@/lib/dates";
 import { getWeightOn } from "@/lib/summary";
 import { payloadFromWorkout } from "@/lib/workouts";
 import { getExerciseOptions, getWorkout } from "../../queries";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function EditWorkoutPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const workout = await getWorkout(id);
+  const { userId } = await getViewer();
+  const workout = await getWorkout(userId, id);
   if (!workout) notFound();
 
-  const [exercises, weight] = await Promise.all([getExerciseOptions(), getWeightOn(workout.date)]);
+  const [exercises, weight] = await Promise.all([getExerciseOptions(userId), getWeightOn(userId, workout.date)]);
 
   return (
     <>

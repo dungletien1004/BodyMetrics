@@ -8,12 +8,14 @@ import { formatDayLong, formatDayShort, weekStartKey } from "@/lib/dates";
 import { kcal, num } from "@/lib/format";
 import { categoryLabel, epley1RM, isIntensity, setsVolume, timeOfDay, workoutKcal } from "@/lib/workouts";
 import { getWorkout } from "../queries";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function WorkoutPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const w = await getWorkout(id);
+  const { userId } = await getViewer();
+  const w = await getWorkout(userId, id);
   if (!w) notFound();
 
   const estimate = w.entries.reduce((a, e) => a + e.kcal, 0);

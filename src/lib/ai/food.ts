@@ -87,12 +87,12 @@ function errorMessage(err: unknown): string {
 }
 
 /** Estimate the foods, portions and macros in a stored food photo. Never throws. */
-export async function analyzeFoodPhoto(photoPath: string, hint?: string): Promise<AnalyzeFoodResult> {
+export async function analyzeFoodPhoto(photoPath: string, userId: string, hint?: string): Promise<AnalyzeFoodResult> {
   if (!hasAiKey()) return { ok: false, error: "Chưa cấu hình ANTHROPIC_API_KEY nên không thể phân tích ảnh." };
 
   let image: string;
   try {
-    image = await imageAsJpegBase64(photoPath);
+    image = await imageAsJpegBase64(photoPath, userId);
   } catch {
     return { ok: false, error: "Không đọc được ảnh đã lưu." };
   }

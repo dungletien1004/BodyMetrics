@@ -7,6 +7,7 @@ import { formatDayShort } from "@/lib/dates";
 import { kcal, num } from "@/lib/format";
 import { best1RM, bestSet, categoryLabel, epley1RM, setsSummary, setsVolume, type SetLike } from "@/lib/workouts";
 import { getExerciseHistory } from "../../queries";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,8 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export default async function ExerciseProgressPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { exercise, entries } = await getExerciseHistory(id);
+  const { userId } = await getViewer();
+  const { exercise, entries } = await getExerciseHistory(userId, id);
   if (!exercise) notFound();
 
   // One row per workout; the same exercise logged twice in a session is merged.

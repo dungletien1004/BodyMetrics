@@ -7,6 +7,7 @@ import type { AnalyzePhotoResult, MealInput } from "@/components/meals/types";
 import { MEAL_TYPES } from "@/components/meals/types";
 import { analyzeFoodPhoto } from "@/lib/ai/food";
 import { hasAiKey } from "@/lib/ai/client";
+import { requireWriter } from "@/lib/auth";
 import { isDayKey, todayKey } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { deleteImage, saveImage, uploadUrl } from "@/lib/storage";
@@ -48,13 +49,14 @@ export async function analyzePhoto(form: FormData): Promise<AnalyzePhotoResult> 
   const dateField = form.get("date");
   const date = isDayKey(dateField) ? dateField : todayKey();
   if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Chưa chọn ảnh." };
-  await cleanupAbandonedPhotos().catch((err) => console.error("cleanupAbandonedPhotos failed", err));
+  const userId = await requireWriter();
+  await cleanupAbandonedPhotos(userId).catch((err) => console.error("cleanupAbandonedPhotos failed", err));
 
   let photo;
   try {
-    const stored = await saveImage(file);
+    const stored = await saveImage(file, userId);
     photo = await db.photo.create({
-      data: { kind: "food", path: stored.path, width: stored.width, height: stored.height, date },
+      data: { userId, kind: "food", path: stored.path, width: stored.width, height: stored.height, date },
     });
   } catch (err) {
     console.error("analyzePhoto: save failed", err);
@@ -74,7 +76,7 @@ export async function analyzePhoto(form: FormData): Promise<AnalyzePhotoResult> 
     };
   }
 
-  const result = await analyzeFoodPhoto(photo.path, hint);
+  const result = await analyzeFoodPhoto(photo.path, userId, hint);
   if (!result.ok) return { ...base, items: [], notes: null, aiRaw: null, warning: `${result.error} Ảnh đã được lưu.` };
 
   const { analysis } = result;
@@ -99,21 +101,22 @@ export async function analyzePhoto(form: FormData): Promise<AnalyzePhotoResult> 
 }
 
 /** Food photos uploaded more than a day ago whose meal was never saved. */
-async function cleanupAbandonedPhotos() {
+async function cleanupAbandonedPhotos(userId: string) {
   const stale = await db.photo.findMany({
-    where: { kind: "food", mealId: null, bodyLogId: null, takenAt: { lt: new Date(Date.now() - 24 * 3600 * 1000) } },
+    where: { userId, kind: "food", mealId: null, bodyLogId: null, takenAt: { lt: new Date(Date.now() - 24 * 3600 * 1000) } },
   });
   if (!stale.length) return;
   await db.photo.deleteMany({ where: { id: { in: stale.map((p) => p.id) } } });
-  await Promise.all(stale.map((p) => deleteImage(p.path)));
+  await Promise.all(stale.map((p) => deleteImage(p.path, userId)));
 }
 
 /** Delete a photo uploaded for a meal that was never saved. Linked photos are left alone. */
 export async function discardPhoto(photoId: string): Promise<void> {
-  const photo = await db.photo.findUnique({ where: { id: photoId } });
+  const userId = await requireWriter();
+  const photo = await db.photo.findFirst({ where: { id: photoId, userId } });
   if (!photo || photo.mealId || photo.bodyLogId || photo.kind !== "food") return;
   await db.photo.delete({ where: { id: photoId } });
-  await deleteImage(photo.path);
+  await deleteImage(photo.path, userId);
 }
 
 function parseMeal(input: MealInput) {
@@ -137,15 +140,16 @@ function parseMeal(input: MealInput) {
 export type SaveMealResult = { error: string } | undefined;
 
 export async function createMeal(input: MealInput): Promise<SaveMealResult> {
+  const userId = await requireWriter();
   const p = parseMeal(input);
   if (!p) return { error: "Dữ liệu chưa hợp lệ. Mỗi bữa cần ít nhất một món có tên." };
 
   await db.$transaction(async (tx) => {
     const meal = await tx.meal.create({
-      data: { ...p.meal, aiRaw: p.aiRaw, items: { create: p.items } },
+      data: { ...p.meal, userId, aiRaw: p.aiRaw, items: { create: p.items } },
     });
     if (p.photoId) {
-      await tx.photo.updateMany({ where: { id: p.photoId, mealId: null }, data: { mealId: meal.id, date: p.meal.date } });
+      await tx.photo.updateMany({ where: { id: p.photoId, userId, mealId: null }, data: { mealId: meal.id, date: p.meal.date } });
     }
   });
 
@@ -154,10 +158,11 @@ export async function createMeal(input: MealInput): Promise<SaveMealResult> {
 }
 
 export async function updateMeal(id: string, input: MealInput): Promise<SaveMealResult> {
+  const userId = await requireWriter();
   const p = parseMeal(input);
   if (!p) return { error: "Dữ liệu chưa hợp lệ. Mỗi bữa cần ít nhất một món có tên." };
 
-  const exists = await db.meal.findUnique({ where: { id }, select: { id: true } });
+  const exists = await db.meal.findFirst({ where: { id, userId }, select: { id: true } });
   if (!exists) return { error: "Bữa ăn không còn tồn tại." };
 
   await db.$transaction([
@@ -173,13 +178,14 @@ export async function updateMeal(id: string, input: MealInput): Promise<SaveMeal
 
 /** Delete a meal with its items, photo rows and photo files. */
 export async function deleteMeal(id: string, redirectTo?: string): Promise<void> {
-  const meal = await db.meal.findUnique({ where: { id }, include: { photos: true } });
+  const userId = await requireWriter();
+  const meal = await db.meal.findFirst({ where: { id, userId }, include: { photos: true } });
   if (meal) {
     await db.$transaction([
       db.photo.deleteMany({ where: { mealId: id } }),
       db.meal.delete({ where: { id } }), // items cascade
     ]);
-    await Promise.all(meal.photos.map((ph) => deleteImage(ph.path)));
+    await Promise.all(meal.photos.map((ph) => deleteImage(ph.path, userId)));
   }
   revalidateAll();
   if (redirectTo?.startsWith("/meals")) redirect(redirectTo);

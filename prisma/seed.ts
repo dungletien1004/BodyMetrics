@@ -1,5 +1,5 @@
 // Seeds the exercise library (MET values from the Compendium of Physical Activities)
-// and the singleton profile. Safe to re-run.
+// shared by all users. Safe to re-run.
 import { PrismaClient } from "@prisma/client";
 
 const db = new PrismaClient();
@@ -55,10 +55,15 @@ const EXERCISES: { name: string; category: string; met: number; muscleGroup?: st
 ];
 
 async function main() {
+  // Shared library rows have userId = null; users' own custom exercises are left alone.
   for (const e of EXERCISES) {
-    await db.exercise.upsert({ where: { name: e.name }, update: { met: e.met, category: e.category, muscleGroup: e.muscleGroup }, create: e });
+    const existing = await db.exercise.findFirst({ where: { userId: null, name: e.name } });
+    if (existing) {
+      await db.exercise.update({ where: { id: existing.id }, data: { met: e.met, category: e.category, muscleGroup: e.muscleGroup } });
+    } else {
+      await db.exercise.create({ data: e });
+    }
   }
-  await db.profile.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
   console.log(`Seeded ${EXERCISES.length} exercises`);
 }
 

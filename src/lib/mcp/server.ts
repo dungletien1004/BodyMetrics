@@ -40,15 +40,27 @@ function json(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+/**
+ * The BodyMetrics user the connector acts for. The /api/mcp route authenticates the OAuth bearer
+ * token and puts the user id in authInfo.extra.userId; every tool reads and writes only that user's data.
+ */
+type ToolContext = { http?: { authInfo?: { extra?: Record<string, unknown> } } };
+
+function actingUser(ctx: ToolContext): string {
+  const id = ctx.http?.authInfo?.extra?.userId;
+  if (typeof id !== "string" || !id) throw new Error("Chưa xác thực tài khoản BodyMetrics.");
+  return id;
+}
+
 function fail(message: string) {
   return { content: [{ type: "text" as const, text: message }], isError: true };
 }
 
-async function dayOverview(date: string) {
+async function dayOverview(userId: string, date: string) {
   const [s, meals, workouts] = await Promise.all([
-    getDaySummary(date),
-    db.meal.findMany({ where: { date }, orderBy: { eatenAt: "asc" }, include: { items: true } }),
-    db.workout.findMany({ where: { date }, orderBy: { startedAt: "asc" }, include: { entries: { include: { exercise: true } } } }),
+    getDaySummary(userId, date),
+    db.meal.findMany({ where: { userId, date }, orderBy: { eatenAt: "asc" }, include: { items: true } }),
+    db.workout.findMany({ where: { userId, date }, orderBy: { startedAt: "asc" }, include: { entries: { include: { exercise: true } } } }),
   ]);
   return {
     date,
@@ -78,9 +90,14 @@ async function dayOverview(date: string) {
   };
 }
 
+/** Shared library plus the user's own custom exercises. */
+function exercisesFor(userId: string) {
+  return db.exercise.findMany({ where: { OR: [{ userId: null }, { userId }] }, orderBy: { name: "asc" } });
+}
+
 /** Exact (case-insensitive) name, else the shortest name containing the query. */
-async function findExercise(name: string) {
-  const all = await db.exercise.findMany();
+async function findExercise(userId: string, name: string) {
+  const all = await exercisesFor(userId);
   const q = name.trim().toLowerCase();
   return (
     all.find((e) => e.name.toLowerCase() === q) ??
@@ -98,7 +115,7 @@ export function registerTools(server: McpServer) {
       inputSchema: z.object({ date: day }),
       annotations: { readOnlyHint: true },
     },
-    async ({ date }) => json(await dayOverview(date ?? todayKey())),
+    async ({ date }, ctx) => json(await dayOverview(actingUser(ctx), date ?? todayKey())),
   );
 
   server.registerTool(
@@ -109,9 +126,10 @@ export function registerTools(server: McpServer) {
       inputSchema: z.object({ days: z.number().int().min(1).max(90).default(14) }),
       annotations: { readOnlyHint: true },
     },
-    async ({ days }) => {
+    async ({ days }, ctx) => {
+      const userId = actingUser(ctx);
       const to = todayKey();
-      const [rows, p] = await Promise.all([getDaySummaries(shiftDay(to, -(days - 1)), to), getProfile()]);
+      const [rows, p] = await Promise.all([getDaySummaries(userId, shiftDay(to, -(days - 1)), to), getProfile(userId)]);
       return json({
         profile: { goal_weight_kg: p.goalWeightKg, daily_deficit_kcal: p.dailyDeficit, protein_per_kg: p.proteinPerKg },
         days: rows.map((d) => ({
@@ -154,10 +172,12 @@ export function registerTools(server: McpServer) {
         note: z.string().max(1000).optional(),
       }),
     },
-    async ({ meal_type, items, date, time, note }) => {
+    async ({ meal_type, items, date, time, note }, ctx) => {
+      const userId = actingUser(ctx);
       const d = date ?? todayKey();
       const meal = await db.meal.create({
         data: {
+          userId,
           date: d,
           type: meal_type,
           eatenAt: new Date(`${d}T${time ?? nowHHmm()}:00`),
@@ -176,7 +196,7 @@ export function registerTools(server: McpServer) {
           },
         },
       });
-      return json({ saved_meal_id: meal.id, day: await dayOverview(d) });
+      return json({ saved_meal_id: meal.id, day: await dayOverview(userId, d) });
     },
   );
 
@@ -188,9 +208,9 @@ export function registerTools(server: McpServer) {
       inputSchema: z.object({ query: z.string().optional() }),
       annotations: { readOnlyHint: true },
     },
-    async ({ query }) => {
+    async ({ query }, ctx) => {
       const q = query?.trim().toLowerCase();
-      const all = await db.exercise.findMany({ orderBy: { name: "asc" } });
+      const all = await exercisesFor(actingUser(ctx));
       return json(
         all
           .filter((e) => !q || e.name.toLowerCase().includes(q) || e.muscleGroup?.toLowerCase().includes(q))
@@ -227,23 +247,25 @@ export function registerTools(server: McpServer) {
         note: z.string().max(2000).optional(),
       }),
     },
-    async ({ entries, date, start_time, duration_min, kcal_override, note }) => {
+    async ({ entries, date, start_time, duration_min, kcal_override, note }, ctx) => {
+      const userId = actingUser(ctx);
       const d = date ?? todayKey();
-      const weight = await getWeightOn(d);
+      const weight = await getWeightOn(userId, d);
       const resolved = [];
       for (const e of entries) {
-        let ex = await findExercise(e.exercise_name);
+        let ex = await findExercise(userId, e.exercise_name);
         if (!ex) {
           if (e.met == null) {
             return fail(`Không tìm thấy bài tập "${e.exercise_name}". Gọi list_exercises để chọn tên đúng, hoặc truyền met để tạo bài mới.`);
           }
-          ex = await db.exercise.create({ data: { name: e.exercise_name.trim(), category: e.category ?? "other", met: e.met } });
+          ex = await db.exercise.create({ data: { userId, name: e.exercise_name.trim(), category: e.category ?? "other", met: e.met } });
         }
         resolved.push({ e, ex });
       }
 
       const workout = await db.workout.create({
         data: {
+          userId,
           date: d,
           startedAt: new Date(`${d}T${start_time ?? nowHHmm()}:00`),
           durationMin: Math.round(duration_min ?? entries.reduce((a, e) => a + e.minutes, 0)),
@@ -270,7 +292,7 @@ export function registerTools(server: McpServer) {
       return json({
         saved_workout_id: workout.id,
         exercises: workout.entries.map((e) => ({ name: e.exercise.name, kcal: e.kcal })),
-        day: await dayOverview(d),
+        day: await dayOverview(userId, d),
       });
     },
   );
@@ -288,10 +310,11 @@ export function registerTools(server: McpServer) {
         note: z.string().max(500).optional(),
       }),
     },
-    async ({ weight_kg, waist_cm, body_fat_pct, date, note }) => {
+    async ({ weight_kg, waist_cm, body_fat_pct, date, note }, ctx) => {
+      const userId = actingUser(ctx);
       if (weight_kg == null && waist_cm == null && body_fat_pct == null) return fail("Cần ít nhất một chỉ số.");
       const log = await db.bodyLog.create({
-        data: { date: date ?? todayKey(), weightKg: weight_kg, waistCm: waist_cm, bodyFatPct: body_fat_pct, note: note?.trim() || null },
+        data: { userId, date: date ?? todayKey(), weightKg: weight_kg, waistCm: waist_cm, bodyFatPct: body_fat_pct, note: note?.trim() || null },
       });
       return json({ saved_body_log_id: log.id, date: log.date });
     },
@@ -305,12 +328,13 @@ export function registerTools(server: McpServer) {
       inputSchema: z.object({ id: z.string() }),
       annotations: { destructiveHint: true },
     },
-    async ({ id }) => {
-      const meal = await db.meal.findUnique({ where: { id }, include: { photos: true } });
+    async ({ id }, ctx) => {
+      const userId = actingUser(ctx);
+      const meal = await db.meal.findFirst({ where: { id, userId }, include: { photos: true } });
       if (!meal) return fail("Không tìm thấy bữa ăn.");
       await db.$transaction([db.photo.deleteMany({ where: { mealId: id } }), db.meal.delete({ where: { id } })]);
-      await Promise.all(meal.photos.map((p) => deleteImage(p.path)));
-      return json({ deleted_meal_id: id, day: await dayOverview(meal.date) });
+      await Promise.all(meal.photos.map((p) => deleteImage(p.path, userId)));
+      return json({ deleted_meal_id: id, day: await dayOverview(userId, meal.date) });
     },
   );
 
@@ -322,11 +346,12 @@ export function registerTools(server: McpServer) {
       inputSchema: z.object({ id: z.string() }),
       annotations: { destructiveHint: true },
     },
-    async ({ id }) => {
-      const w = await db.workout.findUnique({ where: { id } });
+    async ({ id }, ctx) => {
+      const userId = actingUser(ctx);
+      const w = await db.workout.findFirst({ where: { id, userId } });
       if (!w) return fail("Không tìm thấy buổi tập.");
       await db.workout.delete({ where: { id } });
-      return json({ deleted_workout_id: id, day: await dayOverview(w.date) });
+      return json({ deleted_workout_id: id, day: await dayOverview(userId, w.date) });
     },
   );
 
@@ -338,11 +363,12 @@ export function registerTools(server: McpServer) {
       inputSchema: z.object({ id: z.string() }),
       annotations: { destructiveHint: true },
     },
-    async ({ id }) => {
-      const log = await db.bodyLog.findUnique({ where: { id }, include: { photos: true } });
+    async ({ id }, ctx) => {
+      const userId = actingUser(ctx);
+      const log = await db.bodyLog.findFirst({ where: { id, userId }, include: { photos: true } });
       if (!log) return fail("Không tìm thấy lần ghi.");
       await db.$transaction([db.photo.deleteMany({ where: { bodyLogId: id } }), db.bodyLog.delete({ where: { id } })]);
-      await Promise.all(log.photos.map((p) => deleteImage(p.path)));
+      await Promise.all(log.photos.map((p) => deleteImage(p.path, userId)));
       return json({ deleted_body_log_id: id });
     },
   );

@@ -5,6 +5,7 @@ import { AddExerciseForm } from "@/components/workouts/add-exercise-form";
 import { CATEGORIES, CATEGORY_LABEL, isCategory } from "@/lib/workouts";
 import { listExercises } from "../queries";
 import { updateExerciseMet } from "./actions";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,11 @@ export default async function ExercisesPage({ searchParams }: { searchParams: Pr
   const q = (sp.q ?? "").trim();
   const cat = isCategory(sp.cat) ? sp.cat : null;
   const needle = q.toLowerCase();
-  const all = await listExercises();
+  const viewer = await getViewer();
+  const all = await listExercises(viewer.userId);
+  // Users tune their own exercises; the shared library is admin-only.
+  const canEdit = (e: { userId: string | null }) =>
+    !viewer.readOnly && (e.userId === viewer.userId || (e.userId === null && viewer.user.role === "admin"));
   const list = all.filter(
     (e) => (!cat || e.category === cat) && (!needle || e.name.toLowerCase().includes(needle) || e.muscleGroup?.toLowerCase().includes(needle)),
   );
@@ -66,17 +71,21 @@ export default async function ExercisesPage({ searchParams }: { searchParams: Pr
                         {e._count.entries > 0 && ` · đã tập ${e._count.entries} lần`}
                       </span>
                     </Link>
-                    <form action={updateExerciseMet.bind(null, e.id)} className="flex shrink-0 items-center gap-1">
-                      <label className="text-xs text-muted" htmlFor={`met-${e.id}`}>
-                        MET
-                      </label>
-                      <div className="w-16">
-                        <Input id={`met-${e.id}`} name="met" required inputMode="decimal" defaultValue={e.met} className="text-right" />
-                      </div>
-                      <button type="submit" aria-label={`Lưu MET ${e.name}`} className="rounded-lg p-1.5 text-muted hover:bg-surface-2 hover:text-accent">
-                        <Check className="size-4" />
-                      </button>
-                    </form>
+                    {canEdit(e) ? (
+                      <form action={updateExerciseMet.bind(null, e.id)} className="flex shrink-0 items-center gap-1">
+                        <label className="text-xs text-muted" htmlFor={`met-${e.id}`}>
+                          MET
+                        </label>
+                        <div className="w-16">
+                          <Input id={`met-${e.id}`} name="met" required inputMode="decimal" defaultValue={e.met} className="text-right" />
+                        </div>
+                        <button type="submit" aria-label={`Lưu MET ${e.name}`} className="rounded-lg p-1.5 text-muted hover:bg-surface-2 hover:text-accent">
+                          <Check className="size-4" />
+                        </button>
+                      </form>
+                    ) : (
+                      <span className="shrink-0 text-xs text-muted tabular-nums">MET {e.met}</span>
+                    )}
                   </li>
                 ))}
               </ul>

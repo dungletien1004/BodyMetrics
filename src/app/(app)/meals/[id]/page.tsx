@@ -8,14 +8,16 @@ import { formatDayLong } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { uploadUrl } from "@/lib/storage";
 import { getRecentFoods } from "../recent";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function MealPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const { userId } = await getViewer();
   const [meal, recentFoods] = await Promise.all([
-    db.meal.findUnique({ where: { id }, include: { items: true, photos: { orderBy: { takenAt: "asc" } } } }),
-    getRecentFoods(),
+    db.meal.findFirst({ where: { id, userId }, include: { items: true, photos: { orderBy: { takenAt: "asc" } } } }),
+    getRecentFoods(userId),
   ]);
   if (!meal) notFound();
 

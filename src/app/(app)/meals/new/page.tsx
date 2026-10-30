@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui";
 import { hasAiKey } from "@/lib/ai/client";
 import { formatDayLong, isDayKey, todayKey } from "@/lib/dates";
 import { getRecentFoods } from "../recent";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 // AI calls (photo analysis, weekly report) can take tens of seconds on serverless hosts.
@@ -14,7 +15,8 @@ export default async function NewMealPage({ searchParams }: { searchParams: Prom
   const { date: dateParam } = await searchParams;
   const date = isDayKey(dateParam) ? dateParam : todayKey();
   const now = new Date();
-  const recentFoods = await getRecentFoods();
+  const { userId } = await getViewer();
+  const recentFoods = await getRecentFoods(userId);
 
   return (
     <>

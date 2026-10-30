@@ -10,6 +10,7 @@ import { formatDayShort } from "@/lib/dates";
 import { kcal, num, signed } from "@/lib/format";
 import { getProfile } from "@/lib/summary";
 import { WeeklyReports } from "./weekly-reports";
+import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 // AI calls (photo analysis, weekly report) can take tens of seconds on serverless hosts.
@@ -19,7 +20,8 @@ const fullDate = (key: string) => key.split("-").reverse().join("/");
 
 export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<{ weeks?: string | string[] }> }) {
   const weeks = parseWeeks((await searchParams).weeks);
-  const [a, profile] = await Promise.all([getAnalytics(weeks), getProfile()]);
+  const viewer = await getViewer();
+  const [a, profile] = await Promise.all([getAnalytics(viewer.userId, weeks), getProfile(viewer.userId)]);
   const hasWeights = a.days.some((d) => d.weight != null);
   const hasMeals = a.loggedDays > 0;
 
@@ -85,7 +87,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
       )}
 
       <div className="mt-4">
-        <WeeklyReports />
+        <WeeklyReports userId={viewer.userId} readOnly={viewer.readOnly} />
       </div>
     </>
   );

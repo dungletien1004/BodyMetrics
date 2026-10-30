@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireUser, startSession } from "@/lib/auth";
+import { requireUser, requireWriter, startSession } from "@/lib/auth";
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
 import { parseNum } from "@/lib/format";
@@ -31,6 +31,7 @@ export async function changePassword(_prev: PasswordState, form: FormData): Prom
 }
 
 export async function saveProfile(form: FormData) {
+  const userId = await requireWriter();
   const sex = form.get("sex") === "female" ? "female" : "male";
   const clamp = (v: number | null, min: number, max: number, fallback: number) =>
     v == null ? fallback : Math.min(max, Math.max(min, v));
@@ -47,7 +48,7 @@ export async function saveProfile(form: FormData) {
     proteinPerKg: clamp(parseNum(form.get("proteinPerKg")), 0.8, 3, 1.8),
   };
 
-  await db.profile.upsert({ where: { id: 1 }, update: data, create: { id: 1, ...data } });
+  await db.profile.upsert({ where: { userId }, update: data, create: { userId, ...data } });
   revalidatePath("/", "layout");
   redirect("/profile?saved=1");
 }

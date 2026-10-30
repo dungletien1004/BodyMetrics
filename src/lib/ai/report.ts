@@ -45,19 +45,19 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
 const LATE_HOUR = 21;
 
-export async function buildWeekStats(weekStart: string) {
+export async function buildWeekStats(userId: string, weekStart: string) {
   const weekEnd = shiftDay(weekStart, 6);
   const [profile, history, workouts, meals] = await Promise.all([
-    getProfile(),
+    getProfile(userId),
     // Two prior weeks give the moving average and a comparison week.
-    getDaySummaries(shiftDay(weekStart, -14), weekEnd),
+    getDaySummaries(userId, shiftDay(weekStart, -14), weekEnd),
     db.workout.findMany({
-      where: { date: { gte: weekStart, lte: weekEnd } },
+      where: { userId, date: { gte: weekStart, lte: weekEnd } },
       orderBy: { date: "asc" },
       include: { entries: { orderBy: { order: "asc" }, include: { exercise: true, sets: true } } },
     }),
     db.meal.findMany({
-      where: { date: { gte: weekStart, lte: weekEnd } },
+      where: { userId, date: { gte: weekStart, lte: weekEnd } },
       orderBy: { eatenAt: "asc" },
       include: { items: true },
     }),
@@ -196,8 +196,8 @@ Cách viết:
 
 export class ReportError extends Error {}
 
-export async function generateWeeklyReport(weekStart: string) {
-  const stats = await buildWeekStats(weekStart);
+export async function generateWeeklyReport(userId: string, weekStart: string) {
+  const stats = await buildWeekStats(userId, weekStart);
   if (stats.energy.daysLogged === 0 && stats.weight.weighIns.length === 0 && stats.workouts.count === 0) {
     throw new ReportError("Tuần này chưa có dữ liệu nào để viết báo cáo.");
   }
@@ -227,8 +227,8 @@ export async function generateWeeklyReport(weekStart: string) {
   }
 
   return db.weeklyReport.upsert({
-    where: { weekStart },
+    where: { userId_weekStart: { userId, weekStart } },
     update: { stats: JSON.stringify(stats), content: JSON.stringify(content), createdAt: new Date() },
-    create: { weekStart, stats: JSON.stringify(stats), content: JSON.stringify(content) },
+    create: { userId, weekStart, stats: JSON.stringify(stats), content: JSON.stringify(content) },
   });
 }
