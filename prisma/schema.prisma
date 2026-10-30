@@ -157,3 +157,52 @@ model WeeklyReport {
   content   String // markdown written by the AI
   createdAt DateTime @default(now())
 }
+
+// ---- OAuth 2.1 for the claude.ai connector (src/lib/oauth) ----
+// Codes and tokens are stored only as SHA-256 hashes (hex) in `id`.
+// `userId` is a plain id of User (no relation, so deleting a user leaves no dangling FK work here).
+
+// A connector app. Dynamically registered clients get a random id; Client ID Metadata
+// Document clients use their https URL as id (row kept only for the name shown on /profile).
+model OAuthClient {
+  id           String   @id
+  name         String   @default("")
+  redirectUris String[]
+  createdAt    DateTime @default(now())
+}
+
+// Authorization code: single use, ~10 minutes, PKCE S256 required.
+model OAuthCode {
+  id            String    @id // sha256(code)
+  clientId      String
+  userId        String
+  redirectUri   String
+  codeChallenge String // base64url(sha256(code_verifier))
+  scope         String    @default("")
+  resource      String?
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// Access (1 h) and refresh (30 days, rotated on use) tokens. All tokens descending from one
+// authorization share `familyId`; reusing a rotated refresh token revokes the whole family.
+model OAuthToken {
+  id         String    @id // sha256(token)
+  kind       String // access | refresh
+  userId     String
+  clientId   String
+  familyId   String
+  scope      String    @default("")
+  resource   String?
+  expiresAt  DateTime
+  usedAt     DateTime? // refresh tokens: when rotated
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, clientId])
+  @@index([familyId])
+}

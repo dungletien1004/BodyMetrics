@@ -40,7 +40,10 @@ export async function ensureBootstrapUser(): Promise<"exists" | "created" | "mis
   return "created";
 }
 
-/** Relative in-app path to return to after login; anything else falls back to "/". */
+/**
+ * Relative in-app path (query string kept, e.g. the OAuth authorize URL) to return to after
+ * login; anything else falls back to "/". "/\" counts as protocol-relative in browsers.
+ */
 export function safeNext(next: unknown): string {
-  return typeof next === "string" && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/login") ? next : "/";
+  return typeof next === "string" && /^\/(?![/\\])/.test(next) && !next.startsWith("/login") ? next : "/";
 }

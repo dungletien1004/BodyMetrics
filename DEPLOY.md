@@ -23,10 +23,9 @@ Giới hạn của gói miễn phí: Neon Free có 0,5 GB, đủ cho vài nghìn
 | `AUTH_SECRET` | Chuỗi ngẫu nhiên 32+ ký tự |
 | `AUTH_USERNAME` | `admin` (hoặc tên bạn muốn) |
 | `AUTH_PASSWORD` | Mật khẩu đăng nhập lần đầu |
-| `MCP_TOKEN` | Chuỗi ngẫu nhiên 24+ ký tự, dùng cho connector Claude |
 | `ANTHROPIC_API_KEY` | Tùy chọn, để phân tích ảnh ngay trong app |
 
-File `.env.production.local` trên máy đã có sẵn giá trị ngẫu nhiên cho `AUTH_SECRET`, `AUTH_PASSWORD`, `MCP_TOKEN`.
+File `.env.production.local` trên máy đã có sẵn giá trị ngẫu nhiên cho `AUTH_SECRET` và `AUTH_PASSWORD`. Nếu file còn dòng `MCP_TOKEN` thì bỏ đi, không dùng nữa.
 
 Múi giờ mặc định là `Asia/Ho_Chi_Minh` (đặt trong code, đổi bằng `APP_TIMEZONE` nếu cần).
 
@@ -40,11 +39,16 @@ Từ đó, mỗi lần push lên `main` Vercel tự deploy lại; dữ liệu tr
 
 ## 5. Kết nối với Claude (claude.ai)
 
-1. Trên claude.ai: **Settings → Connectors → Add custom connector**.
-2. Tên: `BodyMetrics`. URL: `https://<địa-chỉ-app>/api/mcp/<MCP_TOKEN>`.
-3. Trong cuộc trò chuyện, bật connector BodyMetrics, gửi ảnh bữa ăn hoặc ảnh buổi tập và nói ví dụ "ghi bữa trưa này". Claude sẽ phân tích, lưu vào app và báo lại lượng calo còn lại trong ngày.
+Mỗi người dùng tự kết nối Claude của mình bằng tài khoản BodyMetrics riêng (OAuth), không cần token bí mật.
 
-Coi toàn bộ URL connector như mật khẩu: ai có URL đều ghi được dữ liệu. Muốn thu hồi, đổi `MCP_TOKEN` trên Vercel, redeploy, rồi cập nhật lại URL trong claude.ai.
+1. Trên claude.ai: **Settings → Connectors → Add custom connector**.
+2. Tên: `BodyMetrics`. URL: `https://<địa-chỉ-app>/api/mcp` (cũng hiện trong **Hồ sơ → Kết nối Claude**, có nút sao chép). Bấm **Add**, rồi **Connect**.
+3. Claude mở trang đăng nhập BodyMetrics. Đăng nhập, xem các quyền rồi bấm **Cho phép**. Claude quay lại claude.ai và connector đã sẵn sàng.
+4. Trong cuộc trò chuyện, bật connector BodyMetrics, gửi ảnh bữa ăn hoặc ảnh buổi tập và nói ví dụ "ghi bữa trưa này". Claude sẽ phân tích, lưu vào tài khoản của bạn và báo lại lượng calo còn lại trong ngày.
+
+Claude nhận token truy cập 1 giờ, tự gia hạn bằng refresh token (30 ngày, đổi mới sau mỗi lần dùng). Muốn ngắt kết nối: **Hồ sơ → Kết nối Claude → Thu hồi** (hoặc gỡ connector trên claude.ai). Tài khoản bị khóa thì mọi kết nối của nó ngừng hoạt động ngay.
+
+Endpoint cho ai cần kiểm tra: metadata ở `/.well-known/oauth-authorization-server` và `/.well-known/oauth-protected-resource/api/mcp`; đăng ký client động `/api/oauth/register` (hoặc client_id là URL của Client ID Metadata Document); `/oauth/authorize`, `/api/oauth/token`, `/api/oauth/revoke`. Chạy thử toàn bộ luồng: `node scripts/oauth-e2e.mjs` khi `npm run dev` đang chạy.
 
 ## Sao lưu
 
