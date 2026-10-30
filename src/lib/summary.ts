@@ -1,13 +1,26 @@
 import "server-only";
+import { Prisma } from "@prisma/client";
 import { db } from "./db";
 import { baselineTdee, bmr, intakeTarget, proteinTarget, type EnergyProfile } from "./calc";
 import { dayRange } from "./dates";
 
 // Every function here takes the id of the user whose data to read (see getViewer in lib/auth).
 
-/** The user's profile, created with defaults on first use. */
+/**
+ * The user's profile, created with defaults on first use. Pages call this several times in
+ * parallel, so two first calls can race to create it; the loser just reads the winner's row.
+ */
 export async function getProfile(userId: string) {
-  return db.profile.upsert({ where: { userId }, update: {}, create: { userId } });
+  const existing = await db.profile.findUnique({ where: { userId } });
+  if (existing) return existing;
+  try {
+    return await db.profile.create({ data: { userId } });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return db.profile.findUniqueOrThrow({ where: { userId } });
+    }
+    throw err;
+  }
 }
 
 /** Most recent weight on or before `day`, falling back to the profile's start weight, then 70 kg. */

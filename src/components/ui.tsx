@@ -19,8 +19,10 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
   );
 }
 
+// min-w-0: cards sit in grid columns; without it a chart's measured width can widen the
+// whole column past the phone screen.
 export function Card({ className, ...props }: ComponentProps<"section">) {
-  return <section className={cn("rounded-2xl border border-border bg-surface p-4 sm:p-5", className)} {...props} />;
+  return <section className={cn("min-w-0 rounded-2xl border border-border bg-surface p-4 sm:p-5", className)} {...props} />;
 }
 
 export function CardTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
