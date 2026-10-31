@@ -6,6 +6,7 @@ import { changePasswordUrl, getCurrentUser } from "@/lib/auth";
 import { AUTHORIZE_FIELDS, checkAuthorizeRequest, pickAuthorizeParams } from "@/lib/oauth/authorize";
 import { originFromHeaders } from "@/lib/oauth/origin";
 import { displayName, findActiveUser } from "@/lib/oauth/tokens";
+import { db } from "@/lib/db";
 import { switchAccount } from "./actions";
 
 // OAuth consent screen for the claude.ai connector. The decision posts to /api/oauth/authorize.
@@ -16,11 +17,10 @@ export const metadata = { title: "Kết nối Claude · BodyMetrics" };
 
 // Must match the tools in src/lib/mcp/server.ts exactly.
 const CAN_DO = [
-  { icon: BookOpen, text: "Đọc mục tiêu, tổng kết từng ngày, bữa ăn, buổi tập, cân nặng và thư viện bài tập của bạn" },
-  { icon: PenLine, text: "Ghi bữa ăn, buổi tập (kể cả thêm bài tập mới vào thư viện), cân nặng, vòng eo và % mỡ" },
-  { icon: Trash2, text: "Xóa bữa ăn, buổi tập hoặc lần cân đo khi bạn yêu cầu (kể cả ảnh đính kèm)" },
+  { icon: BookOpen, text: "Đọc mục tiêu, tổng kết từng ngày, bữa ăn, buổi tập, cân nặng và thư viện bài tập của hồ sơ đã chọn" },
+  { icon: PenLine, text: "Ghi bữa ăn, buổi tập (kể cả thêm bài tập mới), cân nặng, vòng eo và % mỡ vào hồ sơ đã chọn" },
+  { icon: Trash2, text: "Xóa bữa ăn, buổi tập hoặc lần cân đo trong hồ sơ đã chọn khi bạn yêu cầu" },
 ];
-const CANNOT = "Không xem được ảnh, không sửa hồ sơ, mật khẩu hay dữ liệu của người khác.";
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -63,6 +63,17 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
 
   const { client, redirectUri } = check.request;
   const name = displayName(user);
+  const group = check.request.connectionGroupId
+    ? await db.mcpConnectionGroup.findFirst({
+        where: {
+          id: check.request.connectionGroupId,
+          ownerUserId: user.id,
+          members: { some: { userId: user.id } },
+        },
+        include: { members: { where: { user: { active: true } }, include: { user: { select: { username: true, name: true } } } } },
+      })
+    : null;
+  if (check.request.connectionGroupId && !group) return <Problem message="Chỉ chủ nhóm mới có thể kết nối Claude cho nhóm này." />;
 
   return (
     <Shell>
@@ -72,8 +83,23 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
         </span>
       </div>
       <h1 className="mb-1 text-center text-lg font-semibold text-balance">
-        Cho phép {client.name} truy cập dữ liệu BodyMetrics của {name}?
+        {group
+          ? `Cho phép ${client.name} truy cập nhóm ${group.name}?`
+          : `Cho phép ${client.name} truy cập dữ liệu BodyMetrics của ${name}?`}
       </h1>
+      {group && (
+        <div className="my-3 rounded-xl bg-surface-2 p-3 text-sm">
+          <p className="font-medium">Claude sẽ có thể đọc và ghi các hồ sơ trong nhóm:</p>
+          <ul className="mt-1 list-disc pl-5">
+            {group.members.map(({ user: member }) => (
+              <li key={member.username}>
+                {member.name.trim() || member.username}{member.name.trim() && member.name.trim() !== member.username ? ` (@${member.username})` : ""}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted">Mỗi lần gọi công cụ phải nêu/chọn hồ sơ. Thành viên có thể rời nhóm để thu hồi quyền với hồ sơ của họ.</p>
+        </div>
+      )}
       <form action={switchAccount.bind(null, here)} className="mb-4 text-center text-sm text-muted">
         Đang đăng nhập: <span className="font-medium text-foreground">{user.username}</span>
         <br />
@@ -93,7 +119,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
         ))}
         <li className="flex items-start gap-2 text-sm text-muted">
           <Ban className="mt-0.5 size-4 shrink-0" />
-          <span>{CANNOT}</span>
+          <span>{group ? "Không sửa hồ sơ, mật khẩu hoặc dữ liệu ngoài nhóm." : "Không xem ảnh, sửa hồ sơ, mật khẩu hay dữ liệu ngoài tài khoản này."}</span>
         </li>
       </ul>
       <p className="mb-5 text-xs text-muted">

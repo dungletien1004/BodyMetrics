@@ -7,6 +7,7 @@ import { listGrants } from "@/lib/oauth/tokens";
 import { revokeConnection } from "./actions";
 import { CopyButton } from "./copy-button";
 import { RefreshConnectionStatus } from "./refresh-connection-status";
+import { SharedClaudeGroups } from "./shared-claude-groups";
 
 // "Kết nối Claude" on /profile: the connector URL, how to add it, and the signed-in user's
 // active grants with a revoke button.
@@ -60,10 +61,11 @@ export async function ClaudeConnections() {
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{g.name}</p>
                 <p className="text-xs text-muted">
+                  {g.connectionGroupName ? `Nhóm ${g.connectionGroupName} · ` : ""}
                   Kết nối {at(g.createdAt)} · {g.lastUsedAt ? `dùng gần nhất ${at(g.lastUsedAt)}` : "chưa dùng"}
                 </p>
               </div>
-              <form action={revokeConnection.bind(null, g.clientId)} className="shrink-0">
+              <form action={revokeConnection.bind(null, g.clientId, g.connectionGroupId)} className="shrink-0">
                 <Button type="submit" variant="danger" className="whitespace-nowrap">
                   Thu hồi
                 </Button>
@@ -72,6 +74,7 @@ export async function ClaudeConnections() {
           ))}
         </ul>
       )}
+      <SharedClaudeGroups />
     </Card>
   );
 }

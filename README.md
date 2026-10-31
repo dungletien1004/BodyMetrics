@@ -40,7 +40,7 @@ Chạy `npm run dev -- -H 0.0.0.0` rồi mở địa chỉ IP của máy tính t
 
 ## Deploy và kết nối với Claude
 
-Xem [DEPLOY.md](DEPLOY.md): deploy miễn phí lên Vercel với database Neon, rồi thêm BodyMetrics làm connector trong claude.ai. Khi đó bạn gửi ảnh bữa ăn hoặc buổi tập cho Claude bằng tài khoản Claude của mình, Claude phân tích và tự lưu vào app.
+Xem [DEPLOY.md](DEPLOY.md): deploy miễn phí lên Vercel với database Neon, rồi kết nối BodyMetrics với Claude. Mỗi người có thể kết nối tài khoản riêng; nhiều tài khoản BodyMetrics cũng có thể tự tham gia một nhóm để dùng chung một connector Claude, với quyền tách theo hồ sơ đã chọn.
 
 ## Dữ liệu
 

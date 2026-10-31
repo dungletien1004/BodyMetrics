@@ -21,7 +21,7 @@ let passed = 0;
 function check(cond, label, extra) {
   if (!cond) {
     console.error(`FAIL  ${label}`, extra ?? "");
-    process.exit(1);
+    throw new Error(`OAuth E2E failed: ${label}`);
   }
   passed++;
   console.log(`ok    ${label}`);
@@ -33,9 +33,9 @@ function pkce() {
   return { verifier, challenge: b64url(createHash("sha256").update(verifier).digest()) };
 }
 
-async function sessionCookie() {
+async function sessionFor(usernameOverride) {
   const db = new PrismaClient();
-  const username = process.env.E2E_USER || process.env.AUTH_USERNAME;
+  const username = usernameOverride || process.env.E2E_USER || process.env.AUTH_USERNAME;
   const user = (username && (await db.user.findUnique({ where: { username } }))) || (await db.user.findFirst());
   await db.$disconnect();
   if (!user) throw new Error("No user in the database: log in once or run `npm run user:set -- <u> <p>`");
@@ -45,7 +45,7 @@ async function sessionCookie() {
     .setIssuedAt()
     .setExpirationTime("1h")
     .sign(new TextEncoder().encode(process.env.AUTH_SECRET));
-  return `bm_session=${jwt}`;
+  return { cookie: `bm_session=${jwt}`, id: user.id, username: user.username };
 }
 
 const get = (path, headers = {}) => fetch(`${BASE}${path}`, { headers, redirect: "manual" });
@@ -57,8 +57,8 @@ const postForm = (path, body, headers = {}) =>
     redirect: "manual",
   });
 
-async function mcp(token, method, params = {}, id = 1) {
-  const res = await fetch(`${BASE}/api/mcp`, {
+async function mcp(token, method, params = {}, id = 1, endpoint = `${BASE}/api/mcp`) {
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -80,7 +80,8 @@ async function mcp(token, method, params = {}, id = 1) {
 const INIT = { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "oauth-e2e", version: "1" } };
 
 async function main() {
-  const cookie = await sessionCookie();
+  const ownerSession = await sessionFor();
+  const cookie = ownerSession.cookie;
 
   // ---- Discovery ----
   const unauth = await mcp(null, "initialize", INIT);
@@ -107,7 +108,7 @@ async function main() {
   check(regRes.status === 201 && client.client_id && client.token_endpoint_auth_method === "none", "DCR registers public client", client);
 
   // ---- Authorize ----
-  const authQuery = (p, extra = {}) =>
+  const authQuery = (p, extra = {}, resource = RESOURCE) =>
     new URLSearchParams({
       response_type: "code",
       client_id: client.client_id,
@@ -116,7 +117,7 @@ async function main() {
       code_challenge_method: "S256",
       state: "st-123",
       scope: "bodymetrics",
-      resource: RESOURCE,
+      resource,
       ...extra,
     });
 
@@ -152,17 +153,17 @@ async function main() {
   const denied = new URL((await decide(q1, "deny")).headers.get("location"));
   check(denied.searchParams.get("error") === "access_denied" && denied.searchParams.get("state") === "st-123", "Từ chối → access_denied + state");
 
-  async function authorize() {
+  async function authorize(resource = RESOURCE, sessionCookie = cookie) {
     const p = pkce();
-    const res = await decide(authQuery(p), "allow");
+    const res = await decide(authQuery(p, {}, resource), "allow", { cookie: sessionCookie, origin: BASE });
     const loc = new URL(res.headers.get("location"));
-    return { res, loc, code: loc.searchParams.get("code"), verifier: p.verifier };
+    return { res, loc, code: loc.searchParams.get("code"), verifier: p.verifier, resource };
   }
 
   // ---- Token: code exchange ----
   const token = (body) => postForm("/api/oauth/token", { client_id: client.client_id, ...body });
   const exchange = (a, extra = {}) =>
-    token({ grant_type: "authorization_code", code: a.code, redirect_uri: REDIRECT, code_verifier: a.verifier, resource: RESOURCE, ...extra });
+    token({ grant_type: "authorization_code", code: a.code, redirect_uri: REDIRECT, code_verifier: a.verifier, resource: a.resource ?? RESOURCE, ...extra });
 
   const a1 = await authorize();
   check(a1.res.status === 303 && a1.code && a1.loc.searchParams.get("state") === "st-123" && a1.loc.searchParams.get("iss") === BASE, "Cho phép → code + state + iss");
@@ -226,10 +227,116 @@ async function main() {
   const live = await (await exchange(keep)).json();
   check((await mcp(live.access_token, "tools/list")).status === 200, "a live grant is left for the /profile list");
 
+  // ---- Shared Claude connector: separate user consent + explicit profile selection ----
+  if (process.env.E2E_USER_2) {
+    const memberSession = await sessionFor(process.env.E2E_USER_2);
+    check(memberSession.id !== ownerSession.id, "shared connector uses two distinct BodyMetrics users");
+    const groupDb = new PrismaClient();
+    let groupId;
+    const marker = `mcp-group-e2e-${Date.now()}-${randomBytes(4).toString("hex")}`;
+    const ownerNote = `${marker}-owner`;
+    const memberNote = `${marker}-member`;
+    try {
+      const owner = await groupDb.user.findUnique({ where: { id: ownerSession.id }, select: { active: true } });
+      const member = await groupDb.user.findUnique({ where: { id: memberSession.id }, select: { active: true } });
+      check(owner?.active && member?.active, "both shared connector users are active");
+      const joinCodeHash = createHash("sha256").update(randomBytes(32)).digest("hex");
+      const group = await groupDb.mcpConnectionGroup.create({
+        data: {
+          name: `OAuth E2E ${marker}`,
+          ownerUserId: ownerSession.id,
+          joinCodeHash,
+          members: { create: [{ userId: ownerSession.id }, { userId: memberSession.id }] },
+        },
+      });
+      groupId = group.id;
+      const groupResource = `${BASE}/api/mcp/shared/${group.id}`;
+      const groupEndpoint = groupResource;
+
+      const prm = await (await get(`/.well-known/oauth-protected-resource/api/mcp/shared/${group.id}`)).json();
+      check(prm.resource === groupResource, "shared MCP metadata identifies this group's endpoint", prm);
+      const groupParams = authQuery(pkce(), {}, groupResource);
+      const groupConsent = await get(`/oauth/authorize?${groupParams}`, { cookie: ownerSession.cookie });
+      const consentHtml = await groupConsent.text();
+      check(
+        groupConsent.status === 200 && consentHtml.includes(group.name) && consentHtml.includes(ownerSession.username) && consentHtml.includes(memberSession.username),
+        "group OAuth consent names the shared group and its members",
+      );
+      const memberConsent = await get(`/oauth/authorize?${groupParams}`, { cookie: memberSession.cookie });
+      check((await memberConsent.text()).includes("Chỉ chủ nhóm"), "only the group owner can authorize the Claude connector");
+      check((await decide(groupParams, "allow", { cookie: memberSession.cookie, origin: BASE })).status === 403, "non-owner cannot authorize shared group access");
+
+      const groupAuthorization = await authorize(groupResource, ownerSession.cookie);
+      const groupToken = await (await exchange(groupAuthorization)).json();
+      check(groupToken.access_token && groupToken.refresh_token, "Claude receives a token scoped to the shared group");
+      check((await mcp(groupToken.access_token, "tools/list", {}, 50, groupEndpoint)).status === 200, "group token works only on its shared endpoint");
+      check((await mcp(groupToken.access_token, "tools/list", {}, 51)).status === 401, "group token is rejected by the personal endpoint");
+      check((await mcp(live.access_token, "tools/list", {}, 52, groupEndpoint)).status === 401, "personal token is rejected by the shared endpoint");
+
+      const listProfiles = await mcp(groupToken.access_token, "tools/call", { name: "list_profiles", arguments: {} }, 53, groupEndpoint);
+      const profilesText = JSON.stringify(listProfiles.body);
+      check(
+        listProfiles.status === 200 && profilesText.includes(ownerSession.id) && profilesText.includes(memberSession.id),
+        "Claude can list only the explicitly joined profiles",
+        profilesText,
+      );
+
+      const missingProfile = await mcp(
+        groupToken.access_token,
+        "tools/call",
+        { name: "get_progress", arguments: { days: 1 } },
+        54,
+        groupEndpoint,
+      );
+      check(missingProfile.status === 200 && JSON.stringify(missingProfile.body).includes("profile_id"), "data tool requires explicit profile_id");
+
+      const outsideProfile = await mcp(
+        groupToken.access_token,
+        "tools/call",
+        { name: "get_progress", arguments: { profile_id: "not-a-group-member", days: 1 } },
+        55,
+        groupEndpoint,
+      );
+      check(JSON.stringify(outsideProfile.body).includes("chưa tham gia nhóm"), "group token cannot select a profile outside its membership");
+
+      const logFor = (profileId, note, weight) =>
+        mcp(
+          groupToken.access_token,
+          "tools/call",
+          { name: "log_body", arguments: { profile_id: profileId, weight_kg: weight, date: "2000-01-01", note } },
+          56,
+          groupEndpoint,
+        );
+      const [ownerLog, memberLog] = await Promise.all([
+        logFor(ownerSession.id, ownerNote, 81.2),
+        logFor(memberSession.id, memberNote, 62.4),
+      ]);
+      check(ownerLog.status === 200 && memberLog.status === 200, "Claude can write to either selected group profile");
+
+      const ownerRow = await groupDb.bodyLog.findFirst({ where: { userId: ownerSession.id, note: ownerNote }, select: { userId: true, weightKg: true } });
+      const memberRow = await groupDb.bodyLog.findFirst({ where: { userId: memberSession.id, note: memberNote }, select: { userId: true, weightKg: true } });
+      const wrongOwnerRow = await groupDb.bodyLog.findFirst({ where: { userId: ownerSession.id, note: memberNote }, select: { userId: true } });
+      const wrongMemberRow = await groupDb.bodyLog.findFirst({ where: { userId: memberSession.id, note: ownerNote }, select: { userId: true } });
+      check(
+        ownerRow?.userId === ownerSession.id && ownerRow.weightKg === 81.2 &&
+          memberRow?.userId === memberSession.id && memberRow.weightKg === 62.4 && !wrongOwnerRow && !wrongMemberRow,
+        "profile-selected writes stay isolated to the selected BodyMetrics user",
+      );
+    } finally {
+      await groupDb.bodyLog.deleteMany({ where: { userId: ownerSession.id, note: ownerNote } });
+      if (process.env.E2E_USER_2) {
+        const memberSession = await sessionFor(process.env.E2E_USER_2);
+        await groupDb.bodyLog.deleteMany({ where: { userId: memberSession.id, note: memberNote } });
+      }
+      if (groupId) await groupDb.mcpConnectionGroup.deleteMany({ where: { id: groupId, ownerUserId: ownerSession.id } });
+      await groupDb.$disconnect();
+    }
+  }
+
   console.log(`\n${passed} checks passed against ${BASE}`);
 }
 
 main().catch((e) => {
   console.error(e);
-  process.exit(1);
+  process.exitCode = 1;
 });

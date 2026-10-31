@@ -30,16 +30,18 @@ model User {
   mustChangePassword Boolean @default(false)
   createdAt    DateTime @default(now())
 
-  profile       Profile?
-  bodyLogs      BodyLog[]
-  photos        Photo[]
-  images        ImageBlob[]
-  meals         Meal[]
-  workouts      Workout[]
-  exercises     Exercise[]
-  weeklyReports WeeklyReport[]
-  oauthCodes    OAuthCode[]
-  oauthTokens   OAuthToken[]
+  profile              Profile?
+  bodyLogs             BodyLog[]
+  photos               Photo[]
+  images               ImageBlob[]
+  meals                Meal[]
+  workouts             Workout[]
+  exercises            Exercise[]
+  weeklyReports        WeeklyReport[]
+  oauthCodes           OAuthCode[]
+  oauthTokens          OAuthToken[]
+  ownedMcpGroups       McpConnectionGroup[]       @relation("McpGroupOwner")
+  mcpGroupMemberships McpConnectionGroupMember[]
 }
 
 // Photo bytes (WebP), kept in the database so the app needs no disk.
@@ -215,19 +217,48 @@ model OAuthClient {
   createdAt    DateTime @default(now())
 }
 
+// A shared Claude connector can access only profiles whose owners explicitly joined this group.
+// The OAuth token is group-scoped; every MCP tool still requires a member profile selection.
+model McpConnectionGroup {
+  id           String                     @id @default(cuid())
+  name         String                     @default("BodyMetrics")
+  ownerUserId  String
+  owner        User                       @relation("McpGroupOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  joinCodeHash String                     @unique
+  createdAt    DateTime                   @default(now())
+  members      McpConnectionGroupMember[]
+  oauthCodes   OAuthCode[]
+  oauthTokens  OAuthToken[]
+
+  @@index([ownerUserId])
+}
+
+model McpConnectionGroupMember {
+  groupId  String
+  group    McpConnectionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime           @default(now())
+
+  @@id([groupId, userId])
+  @@index([userId])
+}
+
 // Authorization code: single use, ~10 minutes, PKCE S256 required.
 model OAuthCode {
-  id            String    @id // sha256(code)
-  clientId      String
-  userId        String
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  redirectUri   String
-  codeChallenge String // base64url(sha256(code_verifier))
-  scope         String    @default("")
-  resource      String?
-  expiresAt     DateTime
-  usedAt        DateTime?
-  createdAt     DateTime  @default(now())
+  id                String              @id // sha256(code)
+  clientId          String
+  userId            String
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connectionGroupId String?
+  connectionGroup   McpConnectionGroup? @relation(fields: [connectionGroupId], references: [id], onDelete: Cascade)
+  redirectUri       String
+  codeChallenge     String // base64url(sha256(code_verifier))
+  scope             String              @default("")
+  resource          String?
+  expiresAt         DateTime
+  usedAt            DateTime?
+  createdAt         DateTime            @default(now())
 
   @@index([userId])
 }
@@ -235,19 +266,21 @@ model OAuthCode {
 // Access (1 h) and refresh (30 days, rotated on use) tokens. All tokens descending from one
 // authorization share `familyId`; reusing a rotated refresh token revokes the whole family.
 model OAuthToken {
-  id         String    @id // sha256(token)
-  kind       String // access | refresh
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  clientId   String
-  familyId   String
-  scope      String    @default("")
-  resource   String?
-  expiresAt  DateTime
-  usedAt     DateTime? // refresh tokens: when rotated
-  revokedAt  DateTime?
-  lastUsedAt DateTime?
-  createdAt  DateTime  @default(now())
+  id                String              @id // sha256(token)
+  kind              String // access | refresh
+  userId            String
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connectionGroupId String?
+  connectionGroup   McpConnectionGroup? @relation(fields: [connectionGroupId], references: [id], onDelete: Cascade)
+  clientId          String
+  familyId          String
+  scope             String              @default("")
+  resource          String?
+  expiresAt         DateTime
+  usedAt            DateTime? // refresh tokens: when rotated
+  revokedAt         DateTime?
+  lastUsedAt        DateTime?
+  createdAt         DateTime            @default(now())
 
   @@index([userId, clientId])
   @@index([familyId])

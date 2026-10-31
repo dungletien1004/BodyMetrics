@@ -40,6 +40,7 @@ export function displayName(user: { username: string; name: string }): string {
 export async function createAuthorizationCode(input: {
   clientId: string;
   userId: string;
+  connectionGroupId?: string | null;
   redirectUri: string;
   codeChallenge: string;
   resource: string | null;
@@ -66,7 +67,14 @@ export interface TokenResponse {
   scope: string;
 }
 
-async function issueTokens(g: { userId: string; clientId: string; familyId: string; scope: string; resource: string | null }) {
+async function issueTokens(g: {
+  userId: string;
+  clientId: string;
+  familyId: string;
+  scope: string;
+  resource: string | null;
+  connectionGroupId: string | null;
+}) {
   const access = randomToken("bm_at_");
   const refresh = randomToken("bm_rt_");
   const now = Date.now();
@@ -108,7 +116,14 @@ export async function exchangeAuthorizationCode(p: {
   if (!(await findActiveUser(row.userId))) throw new GrantError("invalid_grant", "account is not active");
 
   await cleanup();
-  return issueTokens({ userId: row.userId, clientId: row.clientId, familyId: id, scope: row.scope, resource: row.resource });
+  return issueTokens({
+    userId: row.userId,
+    clientId: row.clientId,
+    familyId: id,
+    scope: row.scope,
+    resource: row.resource,
+    connectionGroupId: row.connectionGroupId,
+  });
 }
 
 export async function refreshTokens(p: { refreshToken: string; clientId: string; resource: string | null }): Promise<TokenResponse> {
@@ -128,7 +143,17 @@ export async function refreshTokens(p: { refreshToken: string; clientId: string;
   if (p.resource && p.resource !== row.resource) throw new GrantError("invalid_target", "resource does not match the grant");
   if (!(await findActiveUser(row.userId))) throw new GrantError("invalid_grant", "account is not active");
 
-  return issueTokens({ userId: row.userId, clientId: row.clientId, familyId: row.familyId, scope: row.scope, resource: row.resource });
+  if (row.connectionGroupId && !(await db.mcpConnectionGroup.findUnique({ where: { id: row.connectionGroupId }, select: { id: true } }))) {
+    throw new GrantError("invalid_grant", "shared connection no longer exists");
+  }
+  return issueTokens({
+    userId: row.userId,
+    clientId: row.clientId,
+    familyId: row.familyId,
+    scope: row.scope,
+    resource: row.resource,
+    connectionGroupId: row.connectionGroupId,
+  });
 }
 
 /** RFC 7009. Revoking a refresh token ends the whole grant; an access token only itself. */
@@ -145,6 +170,9 @@ export async function verifyAccessToken(token: string) {
   const now = new Date();
   if (!row || row.kind !== "access" || row.revokedAt || row.expiresAt <= now) return null;
   if (!(await findActiveUser(row.userId))) return null;
+  if (row.connectionGroupId && !(await db.mcpConnectionGroup.findUnique({ where: { id: row.connectionGroupId }, select: { id: true } }))) {
+    return null;
+  }
   if (!row.lastUsedAt || now.getTime() - row.lastUsedAt.getTime() > LAST_USED_RESOLUTION_MS) {
     await db.oAuthToken.update({ where: { id: row.id }, data: { lastUsedAt: now } });
   }
@@ -155,6 +183,8 @@ export async function verifyAccessToken(token: string) {
 
 export interface ConnectorGrant {
   clientId: string;
+  connectionGroupId: string | null;
+  connectionGroupName: string | null;
   name: string;
   createdAt: Date;
   lastUsedAt: Date | null;
@@ -171,21 +201,32 @@ export async function listGrants(userId: string): Promise<ConnectorGrant[]> {
   if (live.length === 0) return [];
   const tokens = await db.oAuthToken.findMany({
     where: { familyId: { in: live.map((t) => t.familyId) }, revokedAt: null },
-    select: { clientId: true, createdAt: true, lastUsedAt: true },
+    select: { clientId: true, connectionGroupId: true, createdAt: true, lastUsedAt: true },
   });
-  const byClient = new Map<string, { createdAt: Date; lastUsedAt: Date | null }>();
+  const byConnection = new Map<string, { clientId: string; connectionGroupId: string | null; createdAt: Date; lastUsedAt: Date | null }>();
   for (const t of tokens) {
-    const g = byClient.get(t.clientId);
-    if (!g) byClient.set(t.clientId, { createdAt: t.createdAt, lastUsedAt: t.lastUsedAt });
+    const key = `${t.clientId}:${t.connectionGroupId ?? "personal"}`;
+    const g = byConnection.get(key);
+    if (!g) byConnection.set(key, { clientId: t.clientId, connectionGroupId: t.connectionGroupId, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt });
     else {
       if (t.createdAt < g.createdAt) g.createdAt = t.createdAt;
       if (t.lastUsedAt && (!g.lastUsedAt || t.lastUsedAt > g.lastUsedAt)) g.lastUsedAt = t.lastUsedAt;
     }
   }
-  const clients = await db.oAuthClient.findMany({ where: { id: { in: [...byClient.keys()] } }, select: { id: true, name: true } });
+  const clientIds = [...new Set([...byConnection.values()].map((g) => g.clientId))];
+  const groupIds = [...new Set([...byConnection.values()].flatMap((g) => (g.connectionGroupId ? [g.connectionGroupId] : [])))];
+  const [clients, groups] = await Promise.all([
+    db.oAuthClient.findMany({ where: { id: { in: clientIds } }, select: { id: true, name: true } }),
+    db.mcpConnectionGroup.findMany({ where: { id: { in: groupIds }, ownerUserId: userId }, select: { id: true, name: true } }),
+  ]);
   const names = new Map(clients.map((c) => [c.id, c.name]));
-  return [...byClient]
-    .map(([clientId, g]) => ({ clientId, name: names.get(clientId) || clientId, ...g }))
+  const groupNames = new Map(groups.map((g) => [g.id, g.name]));
+  return [...byConnection.values()]
+    .map((g) => ({
+      ...g,
+      name: names.get(g.clientId) || g.clientId,
+      connectionGroupName: g.connectionGroupId ? groupNames.get(g.connectionGroupId) ?? "Nhóm đã xóa" : null,
+    }))
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
@@ -194,8 +235,8 @@ export async function revokeAllForUser(userId: string) {
   await db.oAuthToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
 }
 
-export async function revokeGrant(userId: string, clientId: string) {
-  await db.oAuthToken.updateMany({ where: { userId, clientId, revokedAt: null }, data: { revokedAt: new Date() } });
+export async function revokeGrant(userId: string, clientId: string, connectionGroupId: string | null = null) {
+  await db.oAuthToken.updateMany({ where: { userId, clientId, connectionGroupId, revokedAt: null }, data: { revokedAt: new Date() } });
 }
 
 /** Drops stale codes, long-dead tokens and registered clients that never got a token. */

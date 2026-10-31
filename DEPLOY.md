@@ -39,14 +39,23 @@ Từ đó, mỗi lần push lên `main` Vercel tự deploy lại; dữ liệu tr
 
 ## 5. Kết nối với Claude (claude.ai)
 
-Mỗi người dùng tự kết nối Claude của mình bằng tài khoản BodyMetrics riêng (OAuth), không cần token bí mật.
+Có hai cách dùng connector. Cách cá nhân phù hợp khi mỗi người dùng có tài khoản Claude riêng. Nhóm dùng chung phù hợp khi nhiều hồ sơ BodyMetrics cần dùng cùng một tài khoản Claude.
 
-1. Trên claude.ai: **Settings → Connectors → Add custom connector**.
-2. Tên: `BodyMetrics`. URL: `https://<địa-chỉ-app>/api/mcp` (cũng hiện trong **Hồ sơ → Kết nối Claude**, có nút sao chép). Bấm **Add**, rồi **Connect**.
-3. Claude mở trang đăng nhập BodyMetrics. Đăng nhập, xem các quyền rồi bấm **Cho phép**. Claude quay lại claude.ai và connector đã sẵn sàng.
-4. Trong cuộc trò chuyện, bật connector BodyMetrics, gửi ảnh bữa ăn hoặc ảnh buổi tập và nói ví dụ "ghi bữa trưa này". Claude sẽ phân tích, lưu vào tài khoản của bạn và báo lại lượng calo còn lại trong ngày.
+### Kết nối cá nhân
 
-Claude nhận token truy cập 1 giờ, tự gia hạn bằng refresh token (30 ngày, đổi mới sau mỗi lần dùng). Muốn ngắt kết nối: **Hồ sơ → Kết nối Claude → Thu hồi** (hoặc gỡ connector trên claude.ai). Tài khoản bị khóa thì mọi kết nối của nó ngừng hoạt động ngay.
+1. Đăng nhập BodyMetrics, mở **Hồ sơ → Kết nối Claude**, rồi bấm **Mở Claude để kết nối**.
+2. Trong Claude, mở **Customize → Connectors → Add custom connector**. Đặt tên `BodyMetrics`, dán URL cá nhân `/api/mcp` đang hiện trong hồ sơ, bấm **Add**, rồi **Connect**.
+3. Đăng nhập bằng tài khoản BodyMetrics của bạn và bấm **Cho phép**.
+4. Trong chat bật connector. Claude gọi `list_profiles` trước, rồi truyền đúng `profile_id` vào mọi thao tác đọc hoặc ghi.
+
+### Nhiều hồ sơ dùng chung một tài khoản Claude
+
+1. Chủ nhóm mở **Hồ sơ → Kết nối Claude**, tạo nhóm và gửi mã mời riêng cho từng người.
+2. Mỗi người đăng nhập bằng tài khoản BodyMetrics của mình, nhập mã và bấm **Tham gia**. Khi tham gia, người đó đồng ý cho connector của nhóm đọc, ghi và xóa nhật ký trong hồ sơ của mình; xóa chỉ khi người dùng yêu cầu.
+3. Sau khi các thành viên đã tham gia, chủ nhóm sao chép URL connector của nhóm (`/api/mcp/shared/<id>`), thêm URL đó vào cùng tài khoản Claude và cấp quyền bằng tài khoản BodyMetrics chủ nhóm. Trang cấp quyền liệt kê các hồ sơ trong nhóm.
+4. Claude gọi `list_profiles` và phải chọn `profile_id` rõ ràng cho mỗi thao tác. Nếu chưa rõ hồ sơ nào, Claude cần hỏi. Khi thành viên rời nhóm hoặc bị gỡ, các lần gọi tiếp theo không còn truy cập được hồ sơ đó.
+
+Claude nhận token truy cập 1 giờ, tự gia hạn bằng refresh token (30 ngày, đổi mới sau mỗi lần dùng). Muốn ngắt kết nối cá nhân: **Hồ sơ → Kết nối Claude → Thu hồi** (hoặc gỡ connector trên claude.ai). Chủ nhóm có thể xóa nhóm; thành viên có thể rời nhóm hoặc được chủ nhóm gỡ. Tài khoản bị khóa thì các kết nối do tài khoản đó tạo không hoạt động nữa.
 
 Endpoint cho ai cần kiểm tra: metadata ở `/.well-known/oauth-authorization-server` và `/.well-known/oauth-protected-resource/api/mcp`; đăng ký client động `/api/oauth/register` (hoặc client_id là URL của Client ID Metadata Document); `/oauth/authorize`, `/api/oauth/token`, `/api/oauth/revoke`. Chạy thử toàn bộ luồng: `node scripts/oauth-e2e.mjs` khi `npm run dev` đang chạy.
 

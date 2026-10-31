@@ -7,23 +7,21 @@ Tài liệu bàn giao để một AI/dev khác tiếp tục. Đọc kèm `CLAUDE
 - **Production:** https://bodymetrics-gamma.vercel.app — Vercel (Hobby) + Neon Postgres Free (Singapore). Deploy gần nhất: commit `9aa1a39` trên `main` (đã push lên `github.com/dungletien1004/BodyMetrics`).
 - **Deploy:** chưa bật auto-deploy từ GitHub (Vercel GitHub App chưa cài). Deploy bằng CLI từ máy: `npx vercel@65.7.0 deploy --prod --yes` (máy đã `vercel login` tài khoản `dungletien1004`, project `bodymetrics` đã link trong `.vercel/`).
 - **Build trên Vercel:** script `vercel-build` = `tsx prisma/pre-push.ts && prisma db push --skip-generate && prisma db seed && next build`. `pre-push.ts` là bước chuyển đổi dữ liệu idempotent (single-user → multi-user, onboardedAt…).
-- **Tính năng đã có:** đa tài khoản (admin/user, admin tạo tài khoản, bắt đổi mật khẩu lần đầu, admin "xem dữ liệu" chỉ đọc), onboarding 3 bước, ăn uống (kho 282 món Việt, tìm không dấu, chọn khẩu phần, "Ăn lại", chống lưu trùng), tập luyện (MET, set/rep, thư viện bài tập, tiến độ 1RM), cơ thể (cân nặng, số đo, ảnh tiến trình), phân tích (TDEE thích nghi, biểu đồ theo tuần, báo cáo tuần AI), connector Claude qua OAuth 2.1 (MCP tại `/api/mcp`).
+- **Tính năng đã có:** đa tài khoản (admin/user, admin tạo tài khoản, bắt đổi mật khẩu lần đầu, admin "xem dữ liệu" chỉ đọc), onboarding 3 bước, ăn uống (kho 282 món Việt, tìm không dấu, chọn khẩu phần, "Ăn lại", chống lưu trùng), tập luyện (MET, set/rep, thư viện bài tập, tiến độ 1RM), cơ thể (cân nặng, số đo, ảnh tiến trình), phân tích (TDEE thích nghi, biểu đồ theo tuần, báo cáo tuần AI), connector Claude OAuth 2.1 cá nhân (`/api/mcp`) và nhóm dùng chung (`/api/mcp/shared/<groupId>`) với quyền theo user và chọn `profile_id` cho mọi thao tác.
+- **Thay đổi local chưa push/deploy:** nhóm Claude dùng chung nhiều hồ sơ. Mỗi user tự tham gia bằng mã; chủ nhóm kết nối một Claude account; công cụ MCP yêu cầu chọn hồ sơ và kiểm tra membership ở mỗi lần gọi. Kiểm thử OAuth local hai user: 62 checks qua.
 
 ## 2. Việc đang làm dở (ưu tiên)
 
-### 2.1 Bug: ảnh bữa ăn mất sau khi lưu (chỉ xảy ra trên production)
-- Người dùng `dunglt` (tạo bởi admin) tải ảnh, lưu bữa; trang `/meals/[id]` hiện khung ảnh vỡ (alt "Ảnh bữa ăn"). Bữa ăn có Photo row (nên khung mới hiện) nhưng `/api/uploads/<blobId>` không trả ảnh.
-- **Trên local không tái hiện được**: cùng luồng (tìm món → chọn ảnh → Lưu, không có API key) trả 200 `image/webp`.
-- Giả thuyết đang kiểm tra:
-  1. `src/app/api/uploads/[...path]/route.ts` gọi `getViewer()` → `requireUser()`; `requireUser` (`src/lib/auth/index.ts:50-51`) **redirect sang `/doi-mat-khau` khi `mustChangePassword` = true** và redirect `/login` khi không có user. Trong route handler, redirect làm request ảnh trả 307 → ảnh vỡ. Kiểm tra cờ `mustChangePassword` của `dunglt`, và nên đổi route ảnh sang `getCurrentUser()` + tự xử lý view-as, trả 401/404 thay vì redirect.
-  2. Blob thuộc user khác (`readImage(id, viewer.userId)` lọc theo owner).
-  3. Bản Hobby không giữ log runtime cũ; để chẩn đoán: mở trực tiếp `https://bodymetrics-gamma.vercel.app/api/uploads/<blobId>` khi đang đăng nhập `dunglt` và xem status, hoặc chạy `npx vercel@65.7.0 logs --follow` trong lúc tái hiện.
-- Cũng xem vì sao bữa đó có **2 dòng "Gỏi cuốn" giống hệt** (có thể do bấm thêm món 2 lần — nên cân nhắc gộp/hỏi khi thêm trùng).
+### 2.1 Ảnh bữa ăn và món trùng (đã sửa local, chưa kiểm tra production)
+- Route `src/app/api/uploads/[...path]/route.ts` không redirect nữa: trả 401/404 cho request ảnh chưa xác thực/không thuộc user. Regression tests ở `scripts/upload-route.test.ts`.
+- Chặn lưu món trùng y hệt trong cùng bữa; tests ở `scripts/meal-duplicates.test.ts`.
+- Các thay đổi đã commit local trước đó (`026d510`, `a6cfe8d`). Không đăng nhập hoặc đọc/sửa dữ liệu production theo yêu cầu người dùng; cần xác nhận trước khi push/deploy.
 
-### 2.2 Yêu cầu tính năng của người dùng
-1. **Nút "Phân tích bằng AI" khi tải ảnh món ăn** — code đã có sẵn (`analyzePhoto` trong `src/app/(app)/meals/actions.ts`, `src/lib/ai/food.ts`) nhưng chỉ hiện khi có `ANTHROPIC_API_KEY`. **Production chưa có key.** Người dùng cần tạo key ở console.anthropic.com (trả phí theo lượt, ~0,01–0,03 USD/ảnh với `claude-opus-5-5`; rẻ hơn nhiều nếu đổi `AI_MODEL` trong `src/lib/ai/client.ts` sang `claude-haiku-5-5`) rồi tự thêm vào Vercel → Settings → Environment Variables → redeploy. Lưu ý: kết nối claude.ai (connector) **không** cho app dùng AI bên trong app — gói claude.ai không gọi được API từ server.
-2. **AI cho bài tập**: chụp màn hình máy tập / ghi chú số set → AI tự nhận bài, set, rep, kg, phút và lưu (thay vì chọn bài nhập tay). Chưa làm. Gợi ý: thêm `src/lib/ai/workout.ts` tương tự `food.ts` (structured output: entries[{exercise_name khớp thư viện qua `visibleExercises`, minutes, intensity, sets[{reps, weight_kg}], distance_km}], kcal_override nếu ảnh đồng hồ có kcal), server action trong `src/app/(app)/workouts/actions.ts`, nút "Phân tích ảnh" ở đầu `workout-builder.tsx` điền sẵn builder để người dùng xác nhận rồi lưu. Cần `ANTHROPIC_API_KEY`.
-3. Trong lúc chưa có API key: dùng AI qua **claude.ai** — bật connector BodyMetrics trong chat, gửi ảnh và nói "ghi bữa trưa này" / "ghi buổi tập này". Công cụ MCP `log_meal`, `log_workout`, `log_body`… (`src/lib/mcp/server.ts`) đã ghi được, nhưng không lưu file ảnh. Người dùng báo "đã kết nối nhưng chưa dùng được AI" — cần xác nhận họ dùng trong chat claude.ai (bật connector ở nút "+"/tools), và `dùng gần nhất` trong Hồ sơ → Kết nối Claude có cập nhật khi gọi công cụ.
+### 2.2 AI ảnh bữa ăn và tập luyện (đã làm local)
+- Nút AI bữa ăn rõ ràng; nếu thiếu `ANTHROPIC_API_KEY`, hướng dẫn dùng Claude connector. Phân tích ảnh ngay trong app vẫn cần key này; Claude connector không thay thế API key server.
+- Đã thêm phân tích ảnh buổi tập, ghép tên bài với thư viện user, điền gợi ý vào form để người dùng kiểm tra rồi lưu.
+- Trên production chưa cấu hình `ANTHROPIC_API_KEY`; người dùng tự thêm biến trên Vercel. Các thay đổi local trước đó: `165b417`, `129900d`.
+- Connector cá nhân dùng `/api/mcp`; nhóm dùng chung cần các user tham gia bằng mã trước khi chủ nhóm kết nối. `list_profiles` trả hồ sơ được cấp quyền, mọi tool đọc/ghi/xóa yêu cầu `profile_id`; membership được kiểm tra lại cho từng thao tác. Mỗi thành viên có thể rời nhóm hoặc được gỡ.
 
 ### 2.3 Việc nhỏ còn treo
 - Gỡ biến môi trường `MCP_TOKEN` trên Vercel (không còn dùng; CLI bị chặn quyền khi tự gỡ).

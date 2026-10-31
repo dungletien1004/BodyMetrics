@@ -1,6 +1,7 @@
 import "server-only";
+import { db } from "@/lib/db";
 import { ClientError, redirectUriMatches, resolveClient, type OAuthClientInfo } from "./clients";
-import { issuerFor, mcpResourceFor } from "./origin";
+import { groupIdFromResource, issuerFor, MCP_SHARED_PATH_PREFIX, mcpResourceFor } from "./origin";
 
 // Validation shared by the consent page (GET /oauth/authorize) and the decision endpoint
 // (POST /api/oauth/authorize), which re-checks everything the form sends back.
@@ -24,6 +25,7 @@ export interface ValidAuthorizeRequest {
   codeChallenge: string;
   state: string | undefined;
   resource: string | null;
+  connectionGroupId: string | null;
 }
 
 export type AuthorizeCheck =
@@ -57,7 +59,10 @@ export function callbackUrl(redirectUri: string, origin: string, params: Record<
 export function canonicalResource(value: string | undefined | null, origin: string): string | null | false {
   if (!value) return null;
   const v = value.replace(/\/+$/, "");
-  return v === origin || v === mcpResourceFor(origin) ? mcpResourceFor(origin) : false;
+  if (v === origin || v === mcpResourceFor(origin)) return mcpResourceFor(origin);
+  const prefix = `${origin}${MCP_SHARED_PATH_PREFIX}/`;
+  const groupId = v.startsWith(prefix) ? v.slice(prefix.length) : "";
+  return /^c[a-z0-9]{24}$/.test(groupId) ? mcpResourceFor(origin, groupId) : false;
 }
 
 export async function checkAuthorizeRequest(p: AuthorizeParams, origin: string): Promise<AuthorizeCheck> {
@@ -86,6 +91,11 @@ export async function checkAuthorizeRequest(p: AuthorizeParams, origin: string):
   if (!p.code_challenge || !/^[A-Za-z0-9_-]{43}$/.test(p.code_challenge)) return fail("invalid_request", "invalid code_challenge");
   const resource = canonicalResource(p.resource, origin);
   if (resource === false) return fail("invalid_target", "unknown resource");
+  const connectionGroupId = groupIdFromResource(resource);
+  if (connectionGroupId) {
+    const group = await db.mcpConnectionGroup.findUnique({ where: { id: connectionGroupId }, select: { id: true } });
+    if (!group) return fail("invalid_target", "unknown shared connection");
+  }
 
-  return { kind: "ok", request: { client, redirectUri, codeChallenge: p.code_challenge, state, resource } };
+  return { kind: "ok", request: { client, redirectUri, codeChallenge: p.code_challenge, state, resource, connectionGroupId } };
 }

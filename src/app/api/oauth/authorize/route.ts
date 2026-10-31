@@ -3,6 +3,7 @@ import { callbackUrl, checkAuthorizeRequest, pickAuthorizeParams } from "@/lib/o
 import { rememberClient } from "@/lib/oauth/clients";
 import { originOf } from "@/lib/oauth/origin";
 import { createAuthorizationCode, findActiveUser } from "@/lib/oauth/tokens";
+import { db } from "@/lib/db";
 
 // The consent form on /oauth/authorize posts here. Everything is validated again; the
 // session cookie (SameSite=Lax) plus the Origin check keep other sites from approving.
@@ -27,12 +28,26 @@ export async function POST(req: Request) {
   if (check.kind === "fatal") return page(check.message, 400);
   if (check.kind === "redirect") return Response.redirect(check.url, 303);
 
-  const { client, redirectUri, codeChallenge, state, resource } = check.request;
+  const { client, redirectUri, codeChallenge, state, resource, connectionGroupId } = check.request;
+  if (connectionGroupId) {
+    const group = await db.mcpConnectionGroup.findFirst({
+      where: { id: connectionGroupId, ownerUserId: user.id, members: { some: { userId: user.id } } },
+      select: { id: true },
+    });
+    if (!group) return page("Chỉ chủ nhóm mới có thể kết nối Claude cho nhóm này.", 403);
+  }
   if (form.get("decision") !== "allow") {
     return Response.redirect(callbackUrl(redirectUri, origin, { error: "access_denied", error_description: "The user denied access", state }), 303);
   }
 
   await rememberClient(client);
-  const code = await createAuthorizationCode({ clientId: client.id, userId: user.id, redirectUri, codeChallenge, resource });
+  const code = await createAuthorizationCode({
+    clientId: client.id,
+    userId: user.id,
+    connectionGroupId,
+    redirectUri,
+    codeChallenge,
+    resource,
+  });
   return Response.redirect(callbackUrl(redirectUri, origin, { code, state }), 303);
 }
