@@ -8,12 +8,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        // OAuth consent screen: never framed (clickjacking), never leak its query via Referer.
+        // OAuth consent screen: never framed (clickjacking), never leak its query to other sites.
+        // "same-origin", not "no-referrer": with no-referrer browsers send `Origin: null` on the
+        // consent form POST, which the authorize endpoint's origin check then rejects.
         source: "/oauth/:path*",
         headers: [
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
-          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Referrer-Policy", value: "same-origin" },
         ],
       },
     ];

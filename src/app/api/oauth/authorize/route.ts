@@ -14,9 +14,20 @@ function page(message: string, status: number) {
   return new Response(message, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 }
 
+/**
+ * The consent form must come from this app. Prefer the Origin header; when a browser sends
+ * `Origin: null` or none (privacy settings, referrer policies), fall back to Sec-Fetch-Site,
+ * which the browser sets itself and other sites cannot forge.
+ */
+function fromThisApp(req: Request, origin: string): boolean {
+  const sent = req.headers.get("origin");
+  if (sent && sent !== "null") return sent === origin;
+  return req.headers.get("sec-fetch-site") === "same-origin";
+}
+
 export async function POST(req: Request) {
   const origin = originOf(req);
-  if (req.headers.get("origin") !== origin) return page("Yêu cầu không hợp lệ.", 403);
+  if (!fromThisApp(req, origin)) return page("Yêu cầu không hợp lệ.", 403);
 
   const sessionUser = await getCurrentUser();
   if (!sessionUser) return page("Phiên đăng nhập đã hết hạn. Hãy kết nối lại từ Claude.", 401);
