@@ -31,7 +31,8 @@ export const MCP_INSTRUCTIONS = `BodyMetrics là nhật ký giảm cân của ng
 - Ảnh chụp trong BodyMetrics: khi người dùng nói đã chụp/lưu ảnh trong BodyMetrics (hoặc "ảnh mới", "ảnh vừa chụp"), gọi list_new_photos, rồi get_photo để xem từng ảnh, phân tích như trên và gọi log_meal (hoặc log_workout nếu là ảnh buổi tập) kèm photo_id để ảnh tự gắn. Mỗi ảnh chỉ dùng cho một bản ghi.
 - Ảnh gửi trong chat Claude: sau khi log_meal / log_workout từ ảnh đó, LUÔN tự gắn ảnh vào bản ghi vừa lưu mà không cần hỏi: gọi attach_photo (meal_id hoặc workout_id) để lấy upload_url, rồi dùng công cụ chạy code (code execution) tải đúng file ảnh người dùng gửi lên upload_url theo lệnh trong kết quả. Kiểm tra phản hồi có "ok": true. Nếu không có công cụ chạy code hoặc bị chặn mạng, nói ngắn gọn người dùng bật "Code execution and file creation" và cho phép tên miền của BodyMetrics trong Settings → Capabilities, kèm link manual_url để tự gắn.
 - Người dùng gửi link ảnh (http/https trực tiếp tới file ảnh): gọi attach_photo kèm image_url.
-- Muốn gắn ảnh cho bữa ăn/buổi tập đã ghi: KHÔNG ghi lại. Lấy id từ get_day_summary rồi dùng attach_photo như trên.
+- Muốn gắn ảnh cho bữa ăn/buổi tập đã ghi: KHÔNG ghi lại. Lấy id từ get_day_summary rồi dùng attach_photo. Nếu ảnh đã lưu trong BodyMetrics (list_new_photos) thì truyền photo_id, ảnh gắn ngay, không cần chạy code.
+- Nếu không tải được ảnh từ chat lên (không có công cụ chạy code hoặc mạng bị chặn): nói người dùng mở BodyMetrics, mục "Gửi ảnh cho Claude" ở trang Ăn uống, chọn lại ảnh đó, rồi nhắn bạn; khi đó dùng list_new_photos và attach_photo với photo_id.
 - Chỉ xóa (delete_meal / delete_workout / delete_body_log) khi người dùng yêu cầu rõ ràng, ví dụ sửa một bản ghi vừa ghi nhầm. Không tự ý xóa để dọn dẹp hay ghi đè; nếu chưa chắc bản ghi nào, hỏi lại trước.
 - Không đưa lời khuyên y khoa.`;
 
@@ -324,23 +325,31 @@ export function registerTools(server: McpServer) {
     {
       title: "Gắn ảnh vào bữa ăn / buổi tập",
       description:
-        "Gắn ảnh vào bữa ăn (meal_id) hoặc buổi tập (workout_id) đã lưu. Có image_url (link trực tiếp tới file ảnh) thì BodyMetrics tự tải và gắn ngay. Không có image_url thì trả upload_url có hiệu lực ${UPLOAD_LINK_MINUTES} phút: dùng công cụ chạy code tải file ảnh người dùng gửi trong chat lên đó.",
+        "Gắn ảnh vào bữa ăn (meal_id) hoặc buổi tập (workout_id) đã lưu. Có photo_id (ảnh chờ từ list_new_photos) thì gắn ngay. Có image_url (link trực tiếp tới file ảnh) thì BodyMetrics tự tải và gắn ngay. Không có image_url thì trả upload_url có hiệu lực ${UPLOAD_LINK_MINUTES} phút: dùng công cụ chạy code tải file ảnh người dùng gửi trong chat lên đó.",
       inputSchema: z.object({
         profile_username: profileUsernameField,
         meal_id: z.string().optional(),
         workout_id: z.string().optional(),
         image_url: z.string().url().optional().describe("Link http(s) trực tiếp tới file ảnh, nếu người dùng đưa link"),
+        photo_id: z.string().optional().describe("photo_id từ list_new_photos: ảnh người dùng đã lưu trong BodyMetrics"),
       }),
     },
-    async ({ profile_username, meal_id, workout_id, image_url }, ctx) => {
+    async ({ profile_username, meal_id, workout_id, image_url, photo_id }, ctx) => {
       const profile = await actingProfile(ctx, profile_username);
       if (Boolean(meal_id) === Boolean(workout_id)) return fail("Truyền đúng một trong meal_id hoặc workout_id.");
       const target: PhotoTarget = meal_id ? { kind: "meal", id: meal_id } : { kind: "workout", id: workout_id! };
-      const exists = meal_id
-        ? await db.meal.count({ where: { id: meal_id, userId: profile.userId } })
-        : await db.workout.count({ where: { id: workout_id, userId: profile.userId } });
-      if (!exists) return fail(meal_id ? "Không tìm thấy bữa ăn." : "Không tìm thấy buổi tập.");
+      const entry = meal_id
+        ? await db.meal.findFirst({ where: { id: meal_id, userId: profile.userId }, select: { date: true } })
+        : await db.workout.findFirst({ where: { id: workout_id, userId: profile.userId }, select: { date: true } });
+      if (!entry) return fail(meal_id ? "Không tìm thấy bữa ăn." : "Không tìm thấy buổi tập.");
       const origin = appOrigin(ctx);
+
+      if (photo_id) {
+        if (!(await linkPendingPhoto(profile.userId, photo_id, target, entry.date))) {
+          return fail("photo_id không còn hợp lệ (đã gắn vào bản ghi khác, đã xóa hoặc không thuộc hồ sơ này). Gọi list_new_photos để lấy lại.");
+        }
+        return json({ profile_username: profile.profileUsername, photo_attached: true, photo_id, view_url: pageUrl(origin, target) });
+      }
       const manualUrl = pageUrl(origin, target);
 
       if (image_url) {
