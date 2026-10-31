@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { analyzePhoto, createMeal, discardPhoto, updateMeal } from "@/app/(app)/meals/actions";
 import { Badge, Button, Card, CardTitle, cn, Field, Input, Textarea } from "@/components/ui";
 import { downscaleImage } from "@/lib/client-image";
+import { areDuplicateMealItems, hasDuplicateMealItems } from "@/lib/meals";
 import {
   findFoodByName,
   FOOD_CATEGORY_LABEL,
@@ -262,7 +263,29 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
 
   function addRows(newRows: Row[]) {
     // Fill a blank row instead of leaving it dangling.
-    editRows((prev) => [...prev.filter((r) => r.name.trim() || r.kcal.trim()), ...newRows]);
+    const existing = rows.filter((r) => r.name.trim() || r.kcal.trim());
+    const accepted: Row[] = [];
+    let foundDuplicate = false;
+    for (const row of newRows) {
+      const duplicate = [...existing, ...accepted].some((candidate) =>
+        candidate.name.trim() && row.name.trim() && areDuplicateMealItems(toMealItem(candidate), toMealItem(row)),
+      );
+      if (duplicate) foundDuplicate = true;
+      else accepted.push(row);
+    }
+    editRows(() => [...existing, ...accepted]);
+    if (foundDuplicate) setError("Món này đã có với cùng khẩu phần và số liệu. Tăng khẩu phần ở dòng hiện có nếu bạn ăn thêm.");
+  }
+
+  function toMealItem(row: Row) {
+    return {
+      name: row.name,
+      portionG: parseNum(row.portionG),
+      kcal: val(row.kcal),
+      proteinG: val(row.proteinG),
+      carbG: val(row.carbG),
+      fatG: val(row.fatG),
+    };
   }
 
   function pickResult(r: SearchResult) {
@@ -296,6 +319,10 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
     }));
     if (!items.length) {
       setError("Thêm ít nhất một món ăn.");
+      return;
+    }
+    if (hasDuplicateMealItems(items)) {
+      setError("Có hai dòng món giống hệt nhau. Hãy gộp khẩu phần vào một dòng hoặc chỉnh lại số liệu.");
       return;
     }
     if (items.some((i) => [i.kcal, i.proteinG, i.carbG, i.fatG, i.portionG ?? 0].some((n) => n < 0))) {

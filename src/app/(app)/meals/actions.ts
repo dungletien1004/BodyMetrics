@@ -12,6 +12,7 @@ import { hasAiKey } from "@/lib/ai/client";
 import { requireWriter } from "@/lib/auth";
 import { isDayKey, shiftDay, todayKey } from "@/lib/dates";
 import { db } from "@/lib/db";
+import { hasDuplicateMealItems } from "@/lib/meals";
 import { deleteImage, saveImage, uploadUrl } from "@/lib/storage";
 
 const num = z.number().finite().min(0).max(100000);
@@ -121,21 +122,36 @@ export async function discardPhoto(photoId: string): Promise<void> {
   await deleteImage(photo.path, userId);
 }
 
-function parseMeal(input: MealInput) {
+type ParsedMeal = {
+  meal: { date: string; type: z.infer<typeof MealInputSchema>["type"]; eatenAt: Date; note: string | null };
+  items: z.infer<typeof MealInputSchema>["items"];
+  photoId: string | null;
+  aiRaw: string | null;
+};
+
+type ParseMealResult = { ok: false; error: string } | { ok: true; data: ParsedMeal };
+
+function parseMeal(input: MealInput): ParseMealResult {
   const parsed = MealInputSchema.safeParse(input);
-  if (!parsed.success) return null;
+  if (!parsed.success) return { ok: false, error: "Dữ liệu chưa hợp lệ. Mỗi bữa cần ít nhất một món có tên." };
   const m = parsed.data;
+  if (hasDuplicateMealItems(m.items)) {
+    return { ok: false, error: "Có hai dòng món giống hệt nhau. Hãy gộp khẩu phần vào một dòng hoặc chỉnh lại số liệu." };
+  }
   const eatenAt = new Date(`${m.date}T${m.time}:00`);
   return {
-    meal: {
-      date: m.date,
-      type: m.type,
-      eatenAt: Number.isNaN(eatenAt.getTime()) ? new Date() : eatenAt,
-      note: m.note.trim() || null,
+    ok: true,
+    data: {
+      meal: {
+        date: m.date,
+        type: m.type,
+        eatenAt: Number.isNaN(eatenAt.getTime()) ? new Date() : eatenAt,
+        note: m.note.trim() || null,
+      },
+      items: m.items.map((i) => ({ ...i, name: i.name.trim() })),
+      photoId: m.photoId,
+      aiRaw: m.aiRaw,
     },
-    items: m.items.map((i) => ({ ...i, name: i.name.trim() })),
-    photoId: m.photoId,
-    aiRaw: m.aiRaw,
   };
 }
 
@@ -143,8 +159,9 @@ export type SaveMealResult = { error: string } | undefined;
 
 export async function createMeal(input: MealInput): Promise<SaveMealResult> {
   const userId = await requireWriter();
-  const p = parseMeal(input);
-  if (!p) return { error: "Dữ liệu chưa hợp lệ. Mỗi bữa cần ít nhất một món có tên." };
+  const result = parseMeal(input);
+  if (!result.ok) return { error: result.error };
+  const p = result.data;
 
   await db.$transaction(async (tx) => {
     const meal = await tx.meal.create({
@@ -161,8 +178,9 @@ export async function createMeal(input: MealInput): Promise<SaveMealResult> {
 
 export async function updateMeal(id: string, input: MealInput): Promise<SaveMealResult> {
   const userId = await requireWriter();
-  const p = parseMeal(input);
-  if (!p) return { error: "Dữ liệu chưa hợp lệ. Mỗi bữa cần ít nhất một món có tên." };
+  const result = parseMeal(input);
+  if (!result.ok) return { error: result.error };
+  const p = result.data;
 
   const exists = await db.meal.findFirst({ where: { id, userId }, select: { id: true } });
   if (!exists) return { error: "Bữa ăn không còn tồn tại." };
