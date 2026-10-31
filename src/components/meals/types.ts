@@ -48,7 +48,6 @@ export interface MealInput {
   note: string;
   items: MealItemInput[];
   photoId: string | null; // photo uploaded in this editing session, to link to the meal
-  aiRaw: string | null;
 }
 
 /** A recently eaten food, offered as a one-tap quick add. */
@@ -68,15 +67,3 @@ export interface PreviousMeal {
   items: MealItemInput[];
   kcal: number;
 }
-
-export interface AnalyzedPhoto {
-  photoId: string;
-  photoUrl: string;
-  items: MealItemInput[];
-  notes: string | null;
-  aiRaw: string | null;
-  /** Shown above the table when the AI could not help (no key, error, no food found). */
-  warning: string | null;
-}
-
-export type AnalyzePhotoResult = ({ ok: true } & AnalyzedPhoto) | { ok: false; error: string };

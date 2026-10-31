@@ -1,12 +1,12 @@
 # BodyMetrics
 
-Weight-loss tracker: meals (with AI photo calorie analysis), gym/cardio workouts, body measurements, progress photos, analytics. **Multi-user**: each account sees only its own data; admins create accounts and can view any user's data read-only. Deployed on Vercel + Neon. **UI text is Vietnamese.**
+Weight-loss tracker: meals (with optional photos), gym/cardio workouts, body measurements, progress photos, analytics. **Multi-user**: each account sees only its own data; admins create accounts and can view any user's data read-only. Deployed on Vercel + Neon. **UI text is Vietnamese.**
 
 ## Stack
 - Next.js 15 App Router + TypeScript + Tailwind v4 (theme tokens in `src/app/globals.css`)
 - Prisma 6 + Postgres (`prisma/schema.prisma`; Neon in production, `npm run db:up` locally), photos stored in the database
 - Recharts for charts, lucide-react for icons, date-fns for dates
-- Claude API (`@anthropic-ai/sdk`) for food photo analysis and weekly reports
+- Claude Web MCP connector for Claude chat to read/write user-approved BodyMetrics data; AI requests originate in Claude, not the app server
 
 ## Commands
 - First run in a fresh checkout/worktree: `cp .env.example .env && npm install && npm run setup` (db push + seed)
@@ -21,8 +21,8 @@ Weight-loss tracker: meals (with AI photo calorie analysis), gym/cardio workouts
 - Energy math lives in `src/lib/calc.ts` (pure). Exercise kcal = `exerciseKcal(met, kg, minutes, intensity)` (net of resting MET). Store the computed value in `WorkoutEntry.kcal` at save time; `Workout.kcalOverride` replaces the sum when set.
 - Daily totals/targets come from `getDaySummaries(from, to)` / `getDaySummary(date)` in `src/lib/summary.ts`. Reuse them; don't re-aggregate meals/workouts by hand.
 - Weight for a day: `getWeightOn(day)` (latest log on/before that day).
-- Images: `saveImage(file)` from `src/lib/storage.ts` stores the photo as WebP in the `ImageBlob` table and returns its id; create a `Photo` row; render with `uploadUrl(path)`. `imageAsJpegBase64(path)` gives a JPEG for the vision model.
-- AI: `anthropic()` and `AI_MODEL` from `src/lib/ai/client.ts`. Check `hasAiKey()` and show a friendly message when no key. Load the `claude-api` skill before writing Claude API code.
+- Images: `saveImage(file)` from `src/lib/storage.ts` stores the photo as WebP in the `ImageBlob` table and returns its id; create a `Photo` row; render with `uploadUrl(path)`. Photos selected in BodyMetrics are not automatically sent to Claude; users upload them in Claude chat and name the intended profile.
+- AI: do not call the Anthropic API from BodyMetrics. Claude Web connector tools live under `src/lib/mcp/`; every personal-data operation must select and authorize a `profile_username`.
 - Mutations use server actions in a colocated `actions.ts` (`"use server"`), then `revalidatePath`. Parse numeric form fields with `parseNum` from `src/lib/format.ts`.
 - Next 15: `params` and `searchParams` are Promises - `await` them.
 - Pages that read the DB: `export const dynamic = "force-dynamic"`.
@@ -44,8 +44,8 @@ All app routes below are under `src/app/(app)/`.
 | `/profile` | Profile & goals |
 | `/body` | Body logs + progress photos |
 | `/gallery` | All photos |
-| `/meals`, `/meals/new`, `/meals/[id]` | Food log + AI photo analysis (`src/lib/ai/food.ts`) |
+| `/meals`, `/meals/new`, `/meals/[id]` | Food log + optional meal photos |
 | `/workouts`, `/workouts/new`, `/workouts/[id]` | Workout log, exercise library |
-| `/analytics` | Charts, adaptive TDEE, weekly AI report (`src/lib/ai/report.ts`) |
+| `/analytics` | Charts, adaptive TDEE, previously saved weekly reports |
 
 The dashboard links to `/meals/new` (supports `?date=YYYY-MM-DD`) and `/workouts/new` (same).

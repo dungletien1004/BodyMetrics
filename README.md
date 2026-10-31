@@ -1,6 +1,6 @@
 # BodyMetrics
 
-Ứng dụng web cá nhân theo dõi quá trình giảm cân: nhật ký ăn uống (chụp ảnh để AI ước lượng calo), tập gym/cardio (tính calo theo MET), cân nặng, số đo, ảnh tiến trình, và phân tích theo tuần.
+Ứng dụng web cá nhân theo dõi quá trình giảm cân: nhật ký ăn uống (đính kèm ảnh bữa ăn), tập gym/cardio (tính calo theo MET), cân nặng, số đo, ảnh tiến trình và phân tích theo tuần. Có thể kết nối Claude Web để phân tích ảnh và thao tác dữ liệu qua connector.
 
 ## Cài đặt
 
@@ -18,7 +18,7 @@ Trước khi chạy, điền `AUTH_SECRET` (chuỗi ngẫu nhiên 32+ ký tự),
 
 Mở http://localhost:3000, đăng nhập, rồi vào **Hồ sơ** nhập chiều cao, năm sinh, cân nặng và mục tiêu.
 
-Để dùng tính năng phân tích ảnh món ăn và báo cáo tuần, điền `ANTHROPIC_API_KEY` trong `.env`.
+Để dùng Claude phân tích ảnh, mở chat Claude đã bật BodyMetrics connector, tải ảnh lên trong chat và yêu cầu ghi kết quả vào đúng hồ sơ. Ảnh đang chọn trong app không tự gửi sang Claude; nếu muốn lưu ảnh cùng bữa ăn, hãy chọn ảnh trong form và nhấn **Lưu bữa ăn**.
 
 ### Dữ liệu mẫu (tùy chọn)
 

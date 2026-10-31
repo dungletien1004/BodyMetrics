@@ -5,10 +5,8 @@ import type { MealItem } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import type { AnalyzePhotoResult, MealInput } from "@/components/meals/types";
+import type { MealInput } from "@/components/meals/types";
 import { isMealType, MEAL_TYPES } from "@/components/meals/types";
-import { analyzeFoodPhoto } from "@/lib/ai/food";
-import { hasAiKey } from "@/lib/ai/client";
 import { requireWriter } from "@/lib/auth";
 import { isDayKey, shiftDay, todayKey } from "@/lib/dates";
 import { db } from "@/lib/db";
@@ -37,7 +35,6 @@ const MealInputSchema = z.object({
     )
     .min(1),
   photoId: z.string().nullable(),
-  aiRaw: z.string().nullable(),
 });
 
 function revalidateAll() {
@@ -45,10 +42,11 @@ function revalidateAll() {
   revalidatePath("/", "layout");
 }
 
-/** Upload a food photo, store it, and (when a key is configured) ask the AI what is on it. */
-export async function analyzePhoto(form: FormData): Promise<AnalyzePhotoResult> {
+export type UploadMealPhotoResult = { ok: false; error: string } | { ok: true; photoId: string; photoUrl: string };
+
+/** Store a food photo for the meal. Analysis is done in Claude Web through the MCP connector. */
+export async function uploadMealPhoto(form: FormData): Promise<UploadMealPhotoResult> {
   const file = form.get("photo");
-  const hint = String(form.get("hint") ?? "");
   const dateField = form.get("date");
   const date = isDayKey(dateField) ? dateField : todayKey();
   if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Chưa chọn ảnh." };
@@ -62,45 +60,11 @@ export async function analyzePhoto(form: FormData): Promise<AnalyzePhotoResult> 
       data: { userId, kind: "food", path: stored.path, width: stored.width, height: stored.height, date },
     });
   } catch (err) {
-    console.error("analyzePhoto: save failed", err);
+    console.error("uploadMealPhoto failed", err);
     return { ok: false, error: err instanceof Error && err.message ? err.message : "Không lưu được ảnh." };
   }
 
-  const base = { ok: true as const, photoId: photo.id, photoUrl: uploadUrl(photo.path) };
-  // Upload-only: the editor saves a picked photo that was never analyzed.
-  if (form.get("skipAi") === "1") return { ...base, items: [], notes: null, aiRaw: null, warning: null };
-  if (!hasAiKey()) {
-    return {
-      ...base,
-      items: [],
-      notes: null,
-      aiRaw: null,
-      warning: "AI trong ứng dụng chưa được bật nên không đọc được ảnh. Ảnh đã được lưu - hãy tìm món ở ô bên dưới.",
-    };
-  }
-
-  const result = await analyzeFoodPhoto(photo.path, userId, hint);
-  if (!result.ok) return { ...base, items: [], notes: null, aiRaw: null, warning: `${result.error} Ảnh đã được lưu.` };
-
-  const { analysis } = result;
-  return {
-    ...base,
-    items: analysis.items.map((i) => ({
-      name: i.name,
-      portionG: i.portionG,
-      kcal: i.kcal,
-      proteinG: i.proteinG,
-      carbG: i.carbG,
-      fatG: i.fatG,
-      source: "ai",
-      confidence: i.confidence,
-    })),
-    notes: [analysis.notes, ...analysis.items.filter((i) => i.note).map((i) => `${i.name}: ${i.note}`)]
-      .filter(Boolean)
-      .join("\n") || null,
-    aiRaw: result.raw,
-    warning: analysis.items.length === 0 ? `AI không thấy món ăn nào${analysis.noFoodReason ? `: ${analysis.noFoodReason}` : "."}` : null,
-  };
+  return { ok: true, photoId: photo.id, photoUrl: uploadUrl(photo.path) };
 }
 
 /** Food photos uploaded more than a day ago whose meal was never saved. */
@@ -126,7 +90,6 @@ type ParsedMeal = {
   meal: { date: string; type: z.infer<typeof MealInputSchema>["type"]; eatenAt: Date; note: string | null };
   items: z.infer<typeof MealInputSchema>["items"];
   photoId: string | null;
-  aiRaw: string | null;
 };
 
 type ParseMealResult = { ok: false; error: string } | { ok: true; data: ParsedMeal };
@@ -150,7 +113,6 @@ function parseMeal(input: MealInput): ParseMealResult {
       },
       items: m.items.map((i) => ({ ...i, name: i.name.trim() })),
       photoId: m.photoId,
-      aiRaw: m.aiRaw,
     },
   };
 }
@@ -165,7 +127,7 @@ export async function createMeal(input: MealInput): Promise<SaveMealResult> {
 
   await db.$transaction(async (tx) => {
     const meal = await tx.meal.create({
-      data: { ...p.meal, userId, aiRaw: p.aiRaw, items: { create: p.items } },
+      data: { ...p.meal, userId, aiRaw: null, items: { create: p.items } },
     });
     if (p.photoId) {
       await tx.photo.updateMany({ where: { id: p.photoId, userId, mealId: null }, data: { mealId: meal.id, date: p.meal.date } });

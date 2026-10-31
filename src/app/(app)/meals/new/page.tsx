@@ -2,7 +2,6 @@ import { format } from "date-fns";
 import { MealEditor } from "@/components/meals/meal-editor";
 import { defaultMealType } from "@/components/meals/types";
 import { PageHeader } from "@/components/ui";
-import { hasAiKey } from "@/lib/ai/client";
 import { formatDayLong, isDayKey, todayKey } from "@/lib/dates";
 import { getPreviousDayMeals } from "../previous";
 import { getRecentFoods } from "../recent";
@@ -26,7 +25,6 @@ export default async function NewMealPage({ searchParams }: { searchParams: Prom
         mode="new"
         initial={{ date, type: defaultMealType(now), time: format(now, "HH:mm"), note: "", items: [] }}
         recentFoods={recentFoods}
-        aiEnabled={hasAiKey()}
         previousDay={previousDay}
       />
     </>

@@ -13,9 +13,6 @@ import { WeeklyReports } from "./weekly-reports";
 import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
-// AI calls (photo analysis, weekly report) can take tens of seconds on serverless hosts.
-export const maxDuration = 60;
-
 const fullDate = (key: string) => key.split("-").reverse().join("/");
 
 export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<{ weeks?: string | string[] }> }) {

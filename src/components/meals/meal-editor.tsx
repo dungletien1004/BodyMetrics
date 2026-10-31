@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { analyzePhoto, createMeal, discardPhoto, updateMeal } from "@/app/(app)/meals/actions";
+import { createMeal, discardPhoto, updateMeal, uploadMealPhoto } from "@/app/(app)/meals/actions";
 import { Badge, Button, Card, CardTitle, cn, Field, Input, LinkButton, Textarea } from "@/components/ui";
 import { downscaleImage } from "@/lib/client-image";
 import { areDuplicateMealItems, hasDuplicateMealItems } from "@/lib/meals";
@@ -114,12 +114,11 @@ export interface MealEditorProps {
   initial: { date: string; type: MealType; time: string; note: string; items: MealItemInput[] };
   existingPhotos?: { id: string; url: string }[];
   recentFoods: RecentFood[];
-  aiEnabled: boolean;
   /** The previous day's meals per type, offered as "Lặp lại bữa … hôm qua" (new meals only). */
   previousDay?: Partial<Record<MealType, PreviousMeal>>;
 }
 
-export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentFoods, aiEnabled, previousDay }: MealEditorProps) {
+export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentFoods, previousDay }: MealEditorProps) {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>(() => initial.items.map((i) => toRow(i)));
   const [date, setDate] = useState(initial.date);
@@ -129,18 +128,12 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
 
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [hint, setHint] = useState("");
   const [photo, setPhoto] = useState<{ id: string; url: string } | null>(null);
-  const [aiRaw, setAiRaw] = useState<string | null>(null);
-  const [aiNotes, setAiNotes] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
   // A ref, not state: two taps in the same frame both see `saving === false`.
   const savingRef = useRef(false);
-  const analyzingRef = useRef(false);
   // Row keys of items without kcal, waiting for "vẫn lưu?" confirmation.
   const [zeroAsk, setZeroAsk] = useState<string[] | null>(null);
   const [query, setQuery] = useState("");
@@ -184,45 +177,11 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
     // A different picture replaces the one already uploaded.
     if (photo) void discardPhoto(photo.id);
     setPhoto(null);
-    setAiRaw(null);
-    setWarning(null);
     setError(null);
     // Shrunk in the browser so the upload stays under the host's request size limit.
     const f = await downscaleImage(picked);
     setFile(f);
     setPreview(URL.createObjectURL(f));
-  }
-
-  async function runAnalysis() {
-    if (!file || analyzingRef.current) return;
-    analyzingRef.current = true;
-    setAnalyzing(true);
-    setError(null);
-    setWarning(null);
-    try {
-      const fd = new FormData();
-      fd.set("photo", file);
-      fd.set("hint", hint);
-      fd.set("date", date);
-      const res = await analyzePhoto(fd);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      // A re-analysis replaces the previous upload.
-      if (photo && photo.id !== res.photoId) void discardPhoto(photo.id);
-      setPhoto({ id: res.photoId, url: res.photoUrl });
-      setAiRaw(res.aiRaw);
-      setAiNotes(res.notes);
-      setWarning(res.warning);
-      editRows((prev) => [...res.items.map((i) => toRow(i)), ...prev.filter((r) => r.source === "manual" && r.name.trim())]);
-    } catch (err) {
-      console.error(err);
-      setError("Không gửi được ảnh. Ảnh có thể quá lớn (tối đa 20 MB) hoặc máy chủ không phản hồi.");
-    } finally {
-      analyzingRef.current = false;
-      setAnalyzing(false);
-    }
   }
 
   function updateRow(key: string, field: keyof Row, value: string) {
@@ -351,13 +310,12 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
           const fd = new FormData();
           fd.set("photo", file);
           fd.set("date", date);
-          fd.set("skipAi", "1");
-          const up = await analyzePhoto(fd);
+          const up = await uploadMealPhoto(fd);
           if (!up.ok) return fail(up.error);
           photoId = up.photoId;
           setPhoto({ id: up.photoId, url: up.photoUrl });
         }
-        const input: MealInput = { date, type, time, note, items, photoId, aiRaw };
+        const input: MealInput = { date, type, time, note, items, photoId };
         const res = mode === "edit" && mealId ? await updateMeal(mealId, input) : await createMeal(input);
         if (res?.error) fail(res.error);
       } catch (err) {
@@ -372,13 +330,13 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
     router.push(`/meals?date=${initial.date}`);
   }
 
-  const busy = analyzing || saving;
+  const busy = saving;
   const zeroNames = zeroAsk ? rows.filter((r) => zeroAsk.includes(r.key)).map((r) => r.name.trim() || "không tên") : [];
 
   const photoCard =
     mode === "new" ? (
       <Card>
-        <CardTitle>{aiEnabled ? "Ảnh món ăn" : "Ảnh món ăn (không bắt buộc)"}</CardTitle>
+        <CardTitle>Ảnh món ăn (không bắt buộc)</CardTitle>
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => void pickFile(e.target.files?.[0])} />
         <input ref={libraryRef} type="file" accept="image/*" className="hidden" onChange={(e) => void pickFile(e.target.files?.[0])} />
 
@@ -386,22 +344,15 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
           <div className="relative mb-3 overflow-hidden rounded-xl bg-surface-2">
             {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
             <img src={preview} alt="Ảnh món ăn" className="mx-auto max-h-80 w-auto object-contain" />
-            {analyzing && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 text-sm text-white">
-                <Loader2 className="size-6 animate-spin" /> Đang phân tích…
-              </div>
-            )}
           </div>
         ) : (
           <p className="mb-3 text-sm text-muted">
-            {aiEnabled
-              ? "Chụp hoặc chọn ảnh bữa ăn, AI sẽ ước lượng món, khẩu phần và calo. Có thể bỏ qua và tìm món bên dưới."
-              : "Bạn vẫn có thể chụp hoặc chọn ảnh để lưu cùng bữa ăn."}
+            Chụp hoặc chọn ảnh để lưu cùng bữa ăn. Để AI phân tích, tải ảnh lên chat Claude và yêu cầu lưu qua BodyMetrics connector.
           </p>
         )}
 
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant={preview || !aiEnabled ? "secondary" : "primary"} onClick={() => cameraRef.current?.click()} disabled={busy}>
+          <Button type="button" variant="secondary" onClick={() => cameraRef.current?.click()} disabled={busy}>
             <Camera className="size-4" /> {preview ? "Chụp lại" : "Chụp ảnh"}
           </Button>
           <Button type="button" variant="secondary" onClick={() => libraryRef.current?.click()} disabled={busy}>
@@ -409,41 +360,28 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
           </Button>
         </div>
 
-        {file && aiEnabled && (
-          <div className="mt-3 space-y-3">
-            <Field label="Mô tả thêm (không bắt buộc)" hint="Giúp AI đoán đúng hơn: tên món, lượng đã ăn, cách nấu.">
-              <Input value={hint} onChange={(e) => setHint(e.target.value)} placeholder="VD: cơm tấm sườn, ít cơm" maxLength={300} />
-            </Field>
-            <Button type="button" onClick={runAnalysis} disabled={busy} className="w-full sm:w-auto">
-              {analyzing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              {photo ? "Phân tích lại bằng AI" : "Phân tích bằng AI"}
-            </Button>
-          </div>
-        )}
-        {!aiEnabled && (
-          <div className="mt-3 space-y-3 rounded-xl bg-surface-2 p-3 text-xs text-muted">
+        <div className="mt-3 space-y-3 rounded-xl bg-surface-2 p-3 text-xs text-muted">
             <p className="flex gap-2">
               <Sparkles className="mt-0.5 size-3.5 shrink-0 text-accent" />
               <span>
-                Chưa bật phân tích ảnh trong ứng dụng. Mở Claude để kết nối BodyMetrics, xác nhận quyền rồi bật connector trong cuộc trò chuyện. Ảnh đang chọn không tự gửi sang Claude; hãy tải ảnh lên trong chat và nhờ Claude ghi bữa ăn.
+                Ảnh đang chọn không tự gửi sang Claude. Hãy tải ảnh lên trong chat, yêu cầu phân tích và lưu vào đúng hồ sơ bằng username BodyMetrics chính xác, ví dụ bm_demo_an. Ảnh được đính kèm vào bữa ăn này khi bạn nhấn Lưu bữa ăn.
               </span>
             </p>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <LinkButton
-                href="https://claude.ai/settings/connectors?modal=add-custom-connector"
+                href="https://claude.ai/new"
                 target="_blank"
                 rel="noreferrer"
                 variant="secondary"
                 className="w-full sm:w-auto"
               >
-                Mở Claude để kết nối
+                Mở chat Claude
               </LinkButton>
               <Link href="/profile#ket-noi-claude" className="font-medium text-accent underline-offset-2 hover:underline">
                 URL và trạng thái kết nối
               </Link>
             </div>
-          </div>
-        )}
+        </div>
       </Card>
     ) : (
       existingPhotos.length > 0 && (
@@ -459,17 +397,8 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
     <div className="space-y-4">
       {photoCard}
 
-      {warning && (
-        <div className="flex gap-2 rounded-xl border border-intake/40 bg-intake/10 p-3 text-sm">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-intake" />
-          <span>{warning}</span>
-        </div>
-      )}
-
       <Card>
         <CardTitle action={<span className="text-sm font-semibold tabular-nums text-intake">{fmtKcal(totals.kcal)} kcal</span>}>Món ăn</CardTitle>
-
-        {aiNotes && <p className="mb-3 whitespace-pre-line rounded-xl bg-surface-2 p-3 text-xs text-muted">{aiNotes}</p>}
 
         {previous && (
           <button

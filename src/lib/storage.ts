@@ -49,17 +49,6 @@ export async function readImage(id: string, userId: string): Promise<{ data: Uin
   return db.imageBlob.findFirst({ where: { id, userId }, select: { data: true, mime: true } });
 }
 
-/** JPEG copy for sending to the vision model. */
-export async function imageAsJpegBase64(id: string, userId: string, maxEdge = 1280): Promise<string> {
-  const img = await readImage(id, userId);
-  if (!img) throw new Error("Image not found");
-  const buf = await sharp(img.data)
-    .resize({ width: maxEdge, height: maxEdge, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 85 })
-    .toBuffer();
-  return buf.toString("base64");
-}
-
 export async function deleteImage(id: string, userId: string): Promise<void> {
   await db.imageBlob.deleteMany({ where: { id, userId } });
 }

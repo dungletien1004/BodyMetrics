@@ -55,7 +55,6 @@ export default async function MealPage({ params }: { params: Promise<{ id: strin
         }}
         existingPhotos={meal.photos.map((p) => ({ id: p.id, url: uploadUrl(p.path) }))}
         recentFoods={recentFoods}
-        aiEnabled={false}
       />
     </>
   );

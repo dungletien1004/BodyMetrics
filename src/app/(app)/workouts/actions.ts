@@ -9,9 +9,6 @@ import { db } from "@/lib/db";
 import { getWeightOn } from "@/lib/summary";
 import { INTENSITIES, type WorkoutPayload } from "@/lib/workouts";
 import { getViewer, requireWriter } from "@/lib/auth";
-import { analyzeWorkoutPhoto, type AnalyzeWorkoutResult } from "@/lib/ai/workout";
-import { hasAiKey } from "@/lib/ai/client";
-import { deleteImage, saveImage } from "@/lib/storage";
 import { visibleExercises } from "./queries";
 
 const num = (min: number, max: number) => z.number().finite().min(min).max(max);
@@ -37,34 +34,6 @@ const payloadSchema = z.object({
 });
 
 export type SaveResult = { error: string } | undefined;
-
-/** Upload a temporary workout image, analyze it against this user's visible exercise library, then discard it. */
-export async function analyzeWorkoutImage(form: FormData): Promise<AnalyzeWorkoutResult> {
-  const userId = await requireWriter();
-  if (!hasAiKey()) {
-    return { ok: false, error: "AI trong ứng dụng chưa được bật. Hãy kết nối Claude để gửi ảnh và ghi buổi tập." };
-  }
-
-  const file = form.get("photo");
-  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Chưa chọn ảnh buổi tập." };
-
-  const candidates = await db.exercise.findMany({
-    where: visibleExercises(userId),
-    select: { id: true, name: true, category: true },
-  });
-  if (!candidates.length) return { ok: false, error: "Thư viện chưa có bài tập để khớp. Hãy thêm bài tập vào thư viện trước." };
-
-  let stored: Awaited<ReturnType<typeof saveImage>> | null = null;
-  try {
-    stored = await saveImage(file, userId);
-    return await analyzeWorkoutPhoto(stored.path, userId, candidates);
-  } catch (err) {
-    console.error("analyzeWorkoutImage failed", err);
-    return { ok: false, error: err instanceof Error ? err.message : "Không lưu được ảnh buổi tập." };
-  } finally {
-    if (stored) await deleteImage(stored.path, userId).catch((err) => console.error("workout image cleanup failed", err));
-  }
-}
 
 /** Create (id = null) or replace a workout. Every entry's kcal is recomputed here from MET and weight. */
 export async function saveWorkout(id: string | null, input: WorkoutPayload): Promise<SaveResult> {

@@ -1,11 +1,9 @@
 import { CheckCircle2, ChevronDown, Lightbulb, Target, TriangleAlert } from "lucide-react";
-import { Badge, Card, CardTitle, EmptyState } from "@/components/ui";
-import { hasAiKey } from "@/lib/ai/client";
-import { parseReportContent, type WeeklyReportContent } from "@/lib/ai/report";
+import { Badge, Card, CardTitle, EmptyState, LinkButton } from "@/components/ui";
+import { parseReportContent, type WeeklyReportContent } from "@/lib/weekly-report-content";
 import { formatDayShort, shiftDay, todayKey, weekStartKey } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { kcal } from "@/lib/format";
-import { ReportButton } from "./report-button";
 
 const weekLabel = (ws: string) => `${formatDayShort(ws)}–${formatDayShort(shiftDay(ws, 6))}`;
 
@@ -13,33 +11,24 @@ export async function WeeklyReports({ userId, readOnly = false }: { userId: stri
   const reports = await db.weeklyReport.findMany({ where: { userId }, orderBy: { weekStart: "desc" }, take: 26 });
   const lastWeek = shiftDay(weekStartKey(todayKey()), -7);
   const hasLastWeek = reports.some((r) => r.weekStart === lastWeek);
-  const aiReady = hasAiKey() && !readOnly;
-
   return (
     <Card>
-      <CardTitle>Báo cáo tuần (AI)</CardTitle>
+      <CardTitle>Báo cáo tuần</CardTitle>
 
-      {aiReady ? (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-2 p-3">
-          <p className="text-sm">
-            Tuần vừa rồi <span className="font-medium">{weekLabel(lastWeek)}</span>
-            {hasLastWeek ? " đã có báo cáo." : " chưa có báo cáo."}
-          </p>
-          <ReportButton
-            weekStart={lastWeek}
-            label={hasLastWeek ? "Tạo lại báo cáo" : "Tạo báo cáo tuần"}
-            variant={hasLastWeek ? "secondary" : "primary"}
-          />
-        </div>
-      ) : (
-        <div className="mb-4 rounded-xl border border-dashed border-border p-3 text-sm text-muted">
-          Chưa có <code className="rounded bg-surface-2 px-1">ANTHROPIC_API_KEY</code> trong <code className="rounded bg-surface-2 px-1">.env</code>, nên
-          chưa tạo được báo cáo AI. Thêm key rồi khởi động lại app. Các biểu đồ ở trên vẫn hoạt động bình thường.
+      {!readOnly && (
+        <div className="mb-4 flex flex-col gap-3 rounded-xl bg-surface-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-muted">
+            <p>Muốn Claude phân tích tuần {weekLabel(lastWeek)}? Mở chat Claude, bật BodyMetrics connector, nêu đúng username BodyMetrics (ví dụ bm_demo_an) rồi yêu cầu tóm tắt tuần.</p>
+            {hasLastWeek && <p className="mt-1">Báo cáo lưu cũ của tuần này vẫn có bên dưới.</p>}
+          </div>
+          <LinkButton href="https://claude.ai/new" target="_blank" rel="noreferrer" variant="secondary" className="w-full shrink-0 sm:w-auto">
+            Mở chat Claude
+          </LinkButton>
         </div>
       )}
 
       {reports.length === 0 ? (
-        <EmptyState title="Chưa có báo cáo nào">Mỗi tuần, AI đọc số liệu ăn uống, tập luyện, cân nặng và viết nhận xét kèm mục tiêu tuần tới.</EmptyState>
+        <EmptyState title="Chưa có báo cáo đã lưu">Bạn có thể yêu cầu Claude phân tích số liệu tuần qua BodyMetrics connector. Biểu đồ phía trên vẫn cập nhật nhật ký của hồ sơ này.</EmptyState>
       ) : (
         <div className="space-y-3">
           {reports.map((r, i) => {
@@ -55,11 +44,6 @@ export async function WeeklyReports({ userId, readOnly = false }: { userId: stri
                 </summary>
                 <div className="border-t border-border p-3 sm:p-4">
                   {content ? <ReportBody report={content} /> : <p className="text-sm whitespace-pre-wrap">{r.content}</p>}
-                  {aiReady && r.weekStart !== lastWeek && (
-                    <div className="mt-4">
-                      <ReportButton weekStart={r.weekStart} label="Tạo lại" variant="secondary" />
-                    </div>
-                  )}
                 </div>
               </details>
             );

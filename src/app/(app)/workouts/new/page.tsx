@@ -1,6 +1,5 @@
 import { PageHeader } from "@/components/ui";
 import { WorkoutBuilder } from "@/components/workouts/workout-builder";
-import { hasAiKey } from "@/lib/ai/client";
 import { isDayKey, todayKey } from "@/lib/dates";
 import { getWeightOn } from "@/lib/summary";
 import { payloadFromWorkout, timeOfDay, type WorkoutPayload } from "@/lib/workouts";
@@ -34,7 +33,7 @@ export default async function NewWorkoutPage({ searchParams }: { searchParams: P
         title={source ? "Lặp lại buổi tập" : "Buổi tập mới"}
         subtitle={source ? "Đã điền sẵn từ buổi trước - chỉnh số set, tạ rồi lưu." : "Chọn bài tập rồi nhập set hoặc số phút."}
       />
-      <WorkoutBuilder exercises={exercises} habits={habits} initial={initial} initialWeightKg={weight} aiEnabled={hasAiKey()} />
+      <WorkoutBuilder exercises={exercises} habits={habits} initial={initial} initialWeightKg={weight} />
     </>
   );
 }

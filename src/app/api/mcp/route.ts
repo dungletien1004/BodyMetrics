@@ -7,7 +7,7 @@ import { verifyAccessToken } from "@/lib/oauth/tokens";
 // tools read the acting user from ctx.http.authInfo.extra.userId.
 
 export const dynamic = "force-dynamic";
-// AI calls (photo analysis, weekly report) can take tens of seconds on serverless hosts.
+// MCP requests can read or write a profile's daily and historical records.
 export const maxDuration = 60;
 
 const handler = createMcpHandler(registerTools, {

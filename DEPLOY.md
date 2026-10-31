@@ -23,7 +23,8 @@ Giới hạn của gói miễn phí: Neon Free có 0,5 GB, đủ cho vài nghìn
 | `AUTH_SECRET` | Chuỗi ngẫu nhiên 32+ ký tự |
 | `AUTH_USERNAME` | `admin` (hoặc tên bạn muốn) |
 | `AUTH_PASSWORD` | Mật khẩu đăng nhập lần đầu |
-| `ANTHROPIC_API_KEY` | Tùy chọn, để phân tích ảnh ngay trong app |
+
+Không cần `ANTHROPIC_API_KEY`: phân tích ảnh và hỏi đáp dữ liệu được thực hiện trong Claude Web qua BodyMetrics connector. Ảnh cần được tải lên chat Claude thủ công.
 
 File `.env.production.local` trên máy đã có sẵn giá trị ngẫu nhiên cho `AUTH_SECRET` và `AUTH_PASSWORD`. Nếu file còn dòng `MCP_TOKEN` thì bỏ đi, không dùng nữa.
 

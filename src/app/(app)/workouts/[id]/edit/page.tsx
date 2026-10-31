@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/ui";
 import { WorkoutBuilder } from "@/components/workouts/workout-builder";
-import { hasAiKey } from "@/lib/ai/client";
 import { formatDayLong } from "@/lib/dates";
 import { getWeightOn } from "@/lib/summary";
 import { payloadFromWorkout } from "@/lib/workouts";
@@ -32,7 +31,6 @@ export default async function EditWorkoutPage({ params }: { params: Promise<{ id
         initial={payloadFromWorkout(workout)}
         initialWeightKg={weight}
         workoutId={workout.id}
-        aiEnabled={hasAiKey()}
       />
     </>
   );
