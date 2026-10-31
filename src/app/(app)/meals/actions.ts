@@ -119,6 +119,42 @@ function parseMeal(input: MealInput): ParseMealResult {
 
 export type SaveMealResult = { error: string } | undefined;
 
+export type MealPhotoResult = { ok: true; added: number } | { ok: false; error: string };
+
+const MAX_PHOTOS_PER_MEAL = 6;
+
+/** Attach one or more photos to an already saved meal (e.g. one logged through Claude). */
+export async function addMealPhotos(mealId: string, form: FormData): Promise<MealPhotoResult> {
+  const userId = await requireWriter();
+  const meal = await db.meal.findFirst({ where: { id: mealId, userId }, select: { id: true, date: true, _count: { select: { photos: true } } } });
+  if (!meal) return { ok: false, error: "Không tìm thấy bữa ăn." };
+  const files = form.getAll("photos").filter((f): f is File => f instanceof File && f.size > 0);
+  if (!files.length) return { ok: false, error: "Chưa chọn ảnh." };
+  if (meal._count.photos + files.length > MAX_PHOTOS_PER_MEAL) {
+    return { ok: false, error: `Mỗi bữa tối đa ${MAX_PHOTOS_PER_MEAL} ảnh.` };
+  }
+  try {
+    for (const file of files) {
+      const stored = await saveImage(file, userId);
+      await db.photo.create({ data: { ...stored, userId, kind: "food", date: meal.date, mealId: meal.id } });
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error && err.message ? err.message : "Không lưu được ảnh." };
+  }
+  revalidateAll();
+  return { ok: true, added: files.length };
+}
+
+/** Remove one photo from a saved meal, with its stored image. */
+export async function removeMealPhoto(photoId: string): Promise<void> {
+  const userId = await requireWriter();
+  const photo = await db.photo.findFirst({ where: { id: photoId, userId, mealId: { not: null } } });
+  if (!photo) return;
+  await db.photo.delete({ where: { id: photo.id } });
+  await deleteImage(photo.path, userId);
+  revalidateAll();
+}
+
 export async function createMeal(input: MealInput): Promise<SaveMealResult> {
   const userId = await requireWriter();
   const result = parseMeal(input);

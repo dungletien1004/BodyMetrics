@@ -1,7 +1,7 @@
 "use client";
 
 import { Camera, History, ImagePlus, Loader2, PenLine, Plus, Repeat, Search, Sparkles, Trash2, TriangleAlert, X } from "lucide-react";
-import Image from "next/image";
+import { MealPhotos } from "./meal-photos";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -384,13 +384,7 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
         </div>
       </Card>
     ) : (
-      existingPhotos.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto">
-          {existingPhotos.map((p) => (
-            <Image key={p.id} src={p.url} alt="Ảnh bữa ăn" width={320} height={240} unoptimized className="h-48 w-auto rounded-xl object-cover" />
-          ))}
-        </div>
-      )
+      mealId && <MealPhotos mealId={mealId} photos={existingPhotos} />
     );
 
   return (

@@ -18,6 +18,7 @@ export const MCP_INSTRUCTIONS = `BodyMetrics là nhật ký giảm cân của ng
 - Ảnh cân hoặc số đo: gọi log_body.
 - Ngày mặc định là hôm nay theo giờ của người dùng; chỉ truyền date (YYYY-MM-DD) khi họ nói ngày khác.
 - Sau khi ghi, tóm tắt ngắn những gì đã lưu và lượng calo còn lại trong ngày (có trong kết quả trả về).
+- Connector không chuyển được file ảnh sang BodyMetrics. Khi bữa ăn được ghi từ một ảnh, gửi kèm link add_photo_url trong kết quả và nói người dùng mở link đó (đăng nhập đúng hồ sơ) để gắn ảnh vào bữa vừa ghi.
 - Chỉ xóa (delete_meal / delete_workout / delete_body_log) khi người dùng yêu cầu rõ ràng, ví dụ sửa một bản ghi vừa ghi nhầm. Không tự ý xóa để dọn dẹp hay ghi đè; nếu chưa chắc bản ghi nào, hỏi lại trước.
 - Không đưa lời khuyên y khoa.`;
 
@@ -59,6 +60,12 @@ function authContext(ctx: ToolContext) {
   if (typeof userId !== "string" || !userId) throw new Error("Chưa xác thực tài khoản BodyMetrics.");
   if (connectionGroupId !== undefined && typeof connectionGroupId !== "string") throw new Error("Kết nối nhóm không hợp lệ.");
   return { userId, connectionGroupId: typeof connectionGroupId === "string" ? connectionGroupId : null };
+}
+
+/** Public URL of the BodyMetrics app, set by the /api/mcp routes; used to link back to records. */
+function appOrigin(ctx: ToolContext): string | null {
+  const origin = ctx.http?.authInfo?.extra?.appOrigin;
+  return typeof origin === "string" && /^https?:\/\//.test(origin) ? origin : null;
 }
 
 async function actingProfile(ctx: ToolContext, profileUsername: string): Promise<{ userId: string; profileUsername: string }> {
@@ -215,7 +222,7 @@ export function registerTools(server: McpServer) {
     "log_meal",
     {
       title: "Ghi bữa ăn",
-      description: "Lưu một bữa ăn với các món đã ước lượng. Trả về id bữa ăn và tổng kết ngày sau khi lưu.",
+      description: "Lưu một bữa ăn với các món đã ước lượng. Trả về id bữa ăn, add_photo_url (link để người dùng gắn ảnh vào bữa này) và tổng kết ngày sau khi lưu.",
       inputSchema: z.object({
         profile_username: profileUsernameField,
         meal_type: z.enum(["breakfast", "lunch", "dinner", "snack"]).describe("breakfast=sáng, lunch=trưa, dinner=tối, snack=ăn vặt"),
@@ -263,7 +270,14 @@ export function registerTools(server: McpServer) {
           },
         },
       });
-      return json({ profile_username: profile.profileUsername, saved_meal_id: meal.id, day: await dayOverview(userId, d) });
+      const origin = appOrigin(ctx);
+      return json({
+        profile_username: profile.profileUsername,
+        saved_meal_id: meal.id,
+        // The connector can't carry the photo itself; the user attaches it on this page.
+        add_photo_url: origin ? `${origin}/meals/${meal.id}#anh-bua-an` : null,
+        day: await dayOverview(userId, d),
+      });
     },
   );
 

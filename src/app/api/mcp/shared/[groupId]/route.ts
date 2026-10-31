@@ -33,7 +33,7 @@ async function handle(req: Request) {
         scopes: grant.scope.split(" ").filter(Boolean),
         expiresAt: Math.floor(grant.expiresAt.getTime() / 1000),
         resource: new URL(resource),
-        extra: { userId: grant.userId, connectionGroupId: groupId },
+        extra: { userId: grant.userId, connectionGroupId: groupId, appOrigin: originOf(request) },
       };
     },
     { required: true, resourceMetadataPath: `/.well-known/oauth-protected-resource/api/mcp/shared/${groupId}` },

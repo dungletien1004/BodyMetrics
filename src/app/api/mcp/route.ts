@@ -30,7 +30,7 @@ const authed = withMcpAuth(
       scopes: grant.scope.split(" ").filter(Boolean),
       expiresAt: Math.floor(grant.expiresAt.getTime() / 1000),
       resource: new URL(resource),
-      extra: { userId: grant.userId },
+      extra: { userId: grant.userId, appOrigin: originOf(req) },
     };
   },
   { required: true, resourceMetadataPath: PROTECTED_RESOURCE_METADATA_PATH },
