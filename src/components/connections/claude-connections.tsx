@@ -1,11 +1,12 @@
 import { format } from "date-fns";
 import { headers } from "next/headers";
-import { Button, Card, CardTitle } from "@/components/ui";
+import { Button, Card, CardTitle, LinkButton } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { mcpResourceFor, originFromHeaders } from "@/lib/oauth/origin";
 import { listGrants } from "@/lib/oauth/tokens";
 import { revokeConnection } from "./actions";
 import { CopyButton } from "./copy-button";
+import { RefreshConnectionStatus } from "./refresh-connection-status";
 
 // "Kết nối Claude" on /profile: the connector URL, how to add it, and the signed-in user's
 // active grants with a revoke button.
@@ -20,23 +21,36 @@ export async function ClaudeConnections() {
     <Card className="mt-4">
       <CardTitle>Kết nối Claude</CardTitle>
       <p className="mb-2 text-sm text-muted">URL connector</p>
-      <div className="mb-4 flex items-center gap-2">
-        <code className="min-w-0 flex-1 truncate rounded-xl bg-surface-2 px-3 py-2 text-sm select-all">{url}</code>
-        <CopyButton text={url} />
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row">
+        <div className="flex min-w-0 items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded-xl bg-surface-2 px-3 py-2 text-sm select-all">{url}</code>
+          <CopyButton text={url} />
+        </div>
+        <LinkButton
+          href="https://claude.ai/settings/connectors?modal=add-custom-connector"
+          target="_blank"
+          rel="noreferrer"
+          variant="secondary"
+          className="w-full shrink-0 sm:w-auto"
+        >
+          Mở Claude để kết nối
+        </LinkButton>
       </div>
       <ol className="mb-5 list-decimal space-y-1 pl-5 text-sm">
         <li>
-          Trên claude.ai, mở <b>Settings → Connectors → Add custom connector</b>.
+          Claude mở trang thêm connector. Nếu cần, đăng nhập Claude, rồi chọn <b>Add custom connector</b> trong mục <b>Customize → Connectors</b>.
         </li>
-        <li>
-          Đặt tên <b>BodyMetrics</b>, dán URL ở trên rồi bấm <b>Add</b>, sau đó <b>Connect</b>.
-        </li>
+        <li>Đặt tên <b>BodyMetrics</b>, dán URL ở trên, bấm <b>Add</b> rồi <b>Connect</b>.</li>
         <li>
           Đăng nhập bằng tài khoản BodyMetrics của bạn và bấm <b>Cho phép</b>.
         </li>
+        <li>Quay lại đây để xem trạng thái. Sau khi Claude gọi công cụ lần đầu, mục “dùng gần nhất” sẽ cập nhật.</li>
       </ol>
 
-      <p className="mb-2 text-sm font-medium">Đang kết nối</p>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">Đang kết nối</p>
+        <RefreshConnectionStatus />
+      </div>
       {grants.length === 0 ? (
         <p className="text-sm text-muted">Chưa có ứng dụng nào được cấp quyền.</p>
       ) : (

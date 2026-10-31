@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { analyzePhoto, createMeal, discardPhoto, updateMeal } from "@/app/(app)/meals/actions";
-import { Badge, Button, Card, CardTitle, cn, Field, Input, Textarea } from "@/components/ui";
+import { Badge, Button, Card, CardTitle, cn, Field, Input, LinkButton, Textarea } from "@/components/ui";
 import { downscaleImage } from "@/lib/client-image";
 import { areDuplicateMealItems, hasDuplicateMealItems } from "@/lib/meals";
 import {
@@ -421,15 +421,28 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
           </div>
         )}
         {!aiEnabled && (
-          <p className="mt-3 flex gap-2 rounded-xl bg-surface-2 p-3 text-xs text-muted">
-            <Sparkles className="mt-0.5 size-3.5 shrink-0 text-accent" />
-            <span>
-              Chưa bật phân tích ảnh trong ứng dụng. Muốn Claude đọc ảnh và ghi bữa ăn, mở cuộc trò chuyện Claude, bật connector BodyMetrics rồi gửi ảnh. Xem cách kết nối tại{" "}
+          <div className="mt-3 space-y-3 rounded-xl bg-surface-2 p-3 text-xs text-muted">
+            <p className="flex gap-2">
+              <Sparkles className="mt-0.5 size-3.5 shrink-0 text-accent" />
+              <span>
+                Chưa bật phân tích ảnh trong ứng dụng. Mở Claude để kết nối BodyMetrics, xác nhận quyền rồi bật connector trong cuộc trò chuyện. Ảnh đang chọn không tự gửi sang Claude; hãy tải ảnh lên trong chat và nhờ Claude ghi bữa ăn.
+              </span>
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <LinkButton
+                href="https://claude.ai/settings/connectors?modal=add-custom-connector"
+                target="_blank"
+                rel="noreferrer"
+                variant="secondary"
+                className="w-full sm:w-auto"
+              >
+                Mở Claude để kết nối
+              </LinkButton>
               <Link href="/profile#ket-noi-claude" className="font-medium text-accent underline-offset-2 hover:underline">
-                Hồ sơ
-              </Link>.
-            </span>
-          </p>
+                URL và trạng thái kết nối
+              </Link>
+            </div>
+          </div>
         )}
       </Card>
     ) : (

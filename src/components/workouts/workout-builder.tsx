@@ -4,7 +4,7 @@ import { Camera, Check, ChevronDown, Copy, ImagePlus, Loader2, Minus, Plus, Sear
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { analyzeWorkoutImage, saveWorkout, weightForDay } from "@/app/(app)/workouts/actions";
-import { Badge, Button, Card, CardTitle, Field, cn } from "@/components/ui";
+import { Badge, Button, Card, CardTitle, Field, LinkButton, cn } from "@/components/ui";
 import { exerciseKcal, INTENSITY_LABEL, type Intensity } from "@/lib/calc";
 import { downscaleImage } from "@/lib/client-image";
 import { formatDayLong, formatDayShort, isDayKey } from "@/lib/dates";
@@ -359,16 +359,28 @@ export function WorkoutBuilder({
             {analysisApplied && <p className="mt-2 text-xs text-muted">Phân tích lại sẽ thay các gợi ý AI vừa điền.</p>}
           </>
         ) : (
-          <p className="flex gap-2 rounded-xl bg-surface-2 p-3 text-sm text-muted">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-accent" />
-            <span>
-              Phân tích ảnh trong ứng dụng chưa được bật. Bạn có thể bật connector BodyMetrics trong Claude, gửi ảnh và nhờ Claude ghi buổi tập. Xem hướng dẫn tại{" "}
+          <div className="space-y-3 rounded-xl bg-surface-2 p-3 text-sm text-muted">
+            <p className="flex gap-2">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-accent" />
+              <span>
+                Phân tích ảnh trong ứng dụng chưa được bật. Mở Claude để kết nối BodyMetrics và xác nhận quyền. Sau đó bật connector trong cuộc trò chuyện, tải ảnh lên Claude và nhờ ghi buổi tập.
+              </span>
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <LinkButton
+                href="https://claude.ai/settings/connectors?modal=add-custom-connector"
+                target="_blank"
+                rel="noreferrer"
+                variant="secondary"
+                className="w-full sm:w-auto"
+              >
+                Mở Claude để kết nối
+              </LinkButton>
               <Link href="/profile#ket-noi-claude" className="font-medium text-accent underline-offset-2 hover:underline">
-                Hồ sơ
+                URL và trạng thái kết nối
               </Link>
-              .
-            </span>
-          </p>
+            </div>
+          </div>
         )}
         {analysisNotice && <p role="status" className="mt-3 rounded-xl bg-accent/10 p-3 text-sm text-accent">{analysisNotice}</p>}
       </Card>
