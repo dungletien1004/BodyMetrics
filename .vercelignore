@@ -4,5 +4,5 @@
 .claude
 .next
 node_modules
-uploads
-prisma/*.db
+/uploads
+/prisma/*.db
