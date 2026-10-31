@@ -31,7 +31,7 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
   const current = series.latestAvg ?? series.latest;
   // Start weight = first weigh-in; the old profile field only covers accounts with no weigh-ins.
   const start = series.firstWeight ?? profile.startWeightKg;
-  // For "left to goal" and BMI, an old weigh-in (or the start weight) beats showing nothing.
+  // For change since start, "left to goal" and BMI, an old weigh-in (or the start weight) beats showing nothing.
   const lastKnown = current ?? series.latestEver ?? start;
   // Height is a default until onboarding is done, so BMI would be made up.
   const showBmi = profile.onboardedAt != null && lastKnown != null;
@@ -64,7 +64,7 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
               />
               <Stat
                 label="Từ lúc bắt đầu"
-                value={current != null && start != null ? signed(Math.round((current - start) * 10) / 10, 1) : "–"}
+                value={lastKnown != null && start != null ? signed(Math.round((lastKnown - start) * 10) / 10, 1) : "–"}
                 unit="kg"
                 sub={start != null ? `Bắt đầu ${num(start)} kg` : undefined}
               />
@@ -98,7 +98,9 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
             {hasWeights ? (
               <WeightChart data={series.points} goal={profile.goalWeightKg} />
             ) : (
-              <EmptyState title="Chưa có lần cân nào">Ghi cân nặng ở mục “Ghi chỉ số” để xem xu hướng.</EmptyState>
+              <EmptyState title={series.latestEver != null ? `Không có lần cân nào trong ${days} ngày qua` : "Chưa có lần cân nào"}>
+                Ghi cân nặng ở mục “Ghi chỉ số” để xem xu hướng.
+              </EmptyState>
             )}
             <p className="mt-2 text-xs text-muted">Chấm xám: từng lần cân. Đường xanh: trung bình 7 ngày, ít bị nhiễu bởi nước và muối.</p>
           </Card>

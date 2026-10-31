@@ -1,7 +1,10 @@
-import { Camera, Dumbbell, Scale } from "lucide-react";
+import { Camera, Dumbbell, MessageCircle, Scale, X } from "lucide-react";
+import { cookies } from "next/headers";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import type { ReactNode } from "react";
 import { WeightChart } from "@/components/body/weight-chart";
-import { Card, CardTitle, EmptyState, LinkButton, PageHeader, Progress, Stat, cn } from "@/components/ui";
+import { Card, CardTitle, EmptyState, PageHeader, Progress, Stat, cn } from "@/components/ui";
 import { getWeightSeries } from "@/lib/body";
 import { db } from "@/lib/db";
 import { formatDayLong, parseDay, shiftDay, todayKey } from "@/lib/dates";
@@ -9,6 +12,9 @@ import { kcal, num, signed } from "@/lib/format";
 import { uploadUrl } from "@/lib/storage";
 import { getDaySummaries, getProfile } from "@/lib/summary";
 import { getViewer } from "@/lib/auth";
+import { clampNote, energyPlan, rateLabel } from "@/lib/calc";
+import { listGrants } from "@/lib/oauth/tokens";
+import { dismissClaudeTip } from "./dashboard-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +23,12 @@ const WEEKDAY = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 
 export default async function DashboardPage() {
   const today = todayKey();
-  const { userId } = await getViewer();
-  const [profile, week, series, meals, workouts] = await Promise.all([
-    getProfile(userId),
+  const { userId, readOnly } = await getViewer();
+  const profile = await getProfile(userId);
+  // Until onboarding is done every target here would come from default values; admins viewing
+  // someone else (read-only) get a notice instead, since they can't fill it in for them.
+  if (!profile.onboardedAt && !readOnly) redirect("/onboarding");
+  const [week, series, meals, workouts, showClaudeTip] = await Promise.all([
     getDaySummaries(userId, shiftDay(today, -6), today),
     getWeightSeries(userId, 30),
     db.meal.findMany({
@@ -32,11 +41,12 @@ export default async function DashboardPage() {
       orderBy: { startedAt: "asc" },
       include: { entries: { select: { kcal: true, exercise: { select: { name: true } } } } },
     }),
+    claudeTipWanted(userId, readOnly),
   ]);
 
   const t = week.at(-1)!;
   const remaining = t.targetKcal - t.intakeKcal;
-  const needsProfile = !profile.startWeightKg && series.latest == null;
+  const plan = energyPlan(profile, t.weightKg);
   const hasWeights = series.points.some((p) => p.weight != null);
   // Only days with meals logged count toward intake/deficit figures.
   const loggedDays = week.filter((d) => d.mealsLogged > 0);
@@ -48,30 +58,42 @@ export default async function DashboardPage() {
         title={profile.name ? `Chào ${profile.name}` : "Hôm nay"}
         subtitle={formatDayLong(today)}
         action={
-          <div className="flex flex-wrap gap-2">
-            <LinkButton href={`/meals/new?date=${today}`}>
-              <Camera className="size-4" /> Chụp món ăn
-            </LinkButton>
-            <LinkButton href={`/workouts/new?date=${today}`} variant="secondary">
-              <Dumbbell className="size-4" /> Ghi buổi tập
-            </LinkButton>
-            <LinkButton href="/body#new" variant="secondary">
-              <Scale className="size-4" /> Cân
-            </LinkButton>
+          <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto">
+            <QuickAction href={`/meals/new?date=${today}`} icon={<Camera className="size-5 sm:size-4" />} label="Chụp món ăn" primary />
+            <QuickAction href={`/workouts/new?date=${today}`} icon={<Dumbbell className="size-5 sm:size-4" />} label="Ghi buổi tập" />
+            <QuickAction href="/body#new" icon={<Scale className="size-5 sm:size-4" />} label="Cân" />
           </div>
         }
       />
 
-      {needsProfile && (
-        <Card className="mb-4 border-accent/40 bg-accent/5">
+      {!profile.onboardedAt && (
+        // Plain section, not Card: Card's own border/background classes would win over these (cn has no merge).
+        <section className="mb-4 rounded-2xl border border-amber-500/50 bg-amber-500/10 p-4">
           <p className="text-sm">
-            Hãy nhập chiều cao, năm sinh và cân nặng trong{" "}
-            <Link href="/profile" className="font-medium text-accent underline">
-              Hồ sơ
-            </Link>{" "}
-            để app tính đúng mục tiêu calo cho bạn.
+            Người dùng này chưa hoàn tất thiết lập ban đầu (giới tính, năm sinh, chiều cao, mục tiêu). Các mục tiêu calo và đạm dưới đây
+            dựa trên giá trị mặc định, không phải số liệu thật.
           </p>
-        </Card>
+        </section>
+      )}
+
+      {showClaudeTip && (
+        <section className="mb-4 flex items-start gap-3 rounded-2xl border border-accent/40 bg-accent/5 p-4">
+          <MessageCircle className="mt-0.5 size-5 shrink-0 text-accent" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Ghi bằng ảnh qua Claude</p>
+            <p className="mt-0.5 text-sm text-muted">
+              Kết nối BodyMetrics với Claude để gửi ảnh món ăn, ghi cân nặng và buổi tập ngay trong cuộc trò chuyện.
+            </p>
+            <Link href="/profile#ket-noi-claude" className="mt-1 inline-block text-sm font-medium text-accent">
+              Cách kết nối →
+            </Link>
+          </div>
+          <form action={dismissClaudeTip}>
+            <button type="submit" aria-label="Ẩn gợi ý" className="-m-1 rounded-lg p-1 text-muted hover:bg-surface-2">
+              <X className="size-4" />
+            </button>
+          </form>
+        </section>
       )}
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -102,9 +124,9 @@ export default async function DashboardPage() {
             <Progress value={t.intakeKcal} max={t.targetKcal} color={remaining >= 0 ? "bg-intake" : "bg-danger"} />
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <Macro label="Protein" value={t.proteinG} target={t.proteinTargetG} color="bg-protein" />
-            <Macro label="Carb" value={t.carbG} color="bg-carb" />
-            <Macro label="Chất béo" value={t.fatG} color="bg-fat" />
+            <Macro label="Đạm" value={t.proteinG} target={t.proteinTargetG} color="bg-protein" />
+            <Macro label="Tinh bột" value={t.carbG} color="bg-carb" />
+            <Macro label="Béo" value={t.fatG} color="bg-fat" />
           </div>
         </Card>
 
@@ -122,6 +144,15 @@ export default async function DashboardPage() {
             <WeightChart data={series.points} goal={profile.goalWeightKg} height={150} />
           ) : (
             <p className="mt-3 text-sm text-muted">Chưa có lần cân nào.</p>
+          )}
+          {profile.onboardedAt && profile.goalWeightKg != null && (
+            <div className="mt-3 border-t border-border pt-3 text-xs text-muted">
+              <p>
+                Mục tiêu {num(profile.goalWeightKg)} kg · kế hoạch {rateLabel(plan.kgPerWeek)} kg/tuần
+                {plan.weeksToGoal ? `, ≈ ${plan.weeksToGoal} tuần nữa` : ""}
+              </p>
+              {plan.clamped && <p className="mt-1 text-danger">{clampNote(plan.bmr)}</p>}
+            </div>
           )}
         </Card>
 
@@ -193,6 +224,27 @@ export default async function DashboardPage() {
         </Card>
       </div>
     </>
+  );
+}
+
+/** The "connect Claude" card: only for the owner, until dismissed or a connector is granted. */
+async function claudeTipWanted(userId: string, readOnly: boolean): Promise<boolean> {
+  if (readOnly || (await cookies()).get("bm_hide_claude_tip")?.value === userId) return false;
+  return (await listGrants(userId)).length === 0;
+}
+
+function QuickAction({ href, icon, label, primary }: { href: string; icon: ReactNode; label: string; primary?: boolean }) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-center text-xs leading-tight font-medium transition sm:min-h-0 sm:flex-row sm:gap-2 sm:px-4 sm:text-sm",
+        primary ? "bg-accent text-accent-fg hover:opacity-90" : "border border-border bg-surface hover:bg-surface-2",
+      )}
+    >
+      {icon}
+      {label}
+    </Link>
   );
 }
 

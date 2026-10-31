@@ -154,7 +154,8 @@ export function OnboardingWizard({ initialName, initialWeight, thisYear }: { ini
                 {PACES.map((p) => (
                   <Choice key={p.kgPerWeek} selected={pace === p.kgPerWeek} onClick={() => setPace(p.kgPerWeek)}>
                     <span className="block font-medium">{p.label}</span>
-                    <span className="block text-xs text-muted">{rateLabel(p.kgPerWeek)} kg/tuần</span>
+                    <span className="block text-xs text-muted">{rateLabel(p.kgPerWeek)}</span>
+                    <span className="block text-xs text-muted">kg/tuần</span>
                   </Choice>
                 ))}
               </div>
