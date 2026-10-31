@@ -4,18 +4,19 @@ Tài liệu bàn giao để một AI/dev khác tiếp tục. Đọc kèm `CLAUDE
 
 ## 1. Trạng thái hiện tại
 
-- **Production:** https://bodymetrics-gamma.vercel.app — Vercel (Hobby) + Neon Postgres Free (Singapore). Deploy gần nhất: commit `9aa1a39` trên `main` (đã push lên `github.com/dungletien1004/BodyMetrics`).
-- **Deploy:** chưa bật auto-deploy từ GitHub (Vercel GitHub App chưa cài). Deploy bằng CLI từ máy: `npx vercel@65.7.0 deploy --prod --yes` (máy đã `vercel login` tài khoản `dungletien1004`, project `bodymetrics` đã link trong `.vercel/`).
+- **Production:** https://bodymetrics-gamma.vercel.app — Vercel (Hobby) + Neon Postgres Free (Singapore). Bản mới nhất được deploy trực tiếp từ source local commit `afd37ab` ngày 31/10/2026 (deployment `dpl_DcCEu8JeSVVPHWW8jaqc8HNbCbhb`, trạng thái READY).
+- **Deploy:** chưa bật auto-deploy từ GitHub (Vercel GitHub App chưa cài). Deploy bằng CLI: `npx vercel@65.7.0 deploy --prod --yes`; Vercel CLI đã đăng nhập và project `bodymetrics` đã link trong `.vercel/`.
 - **Build trên Vercel:** script `vercel-build` = `tsx prisma/pre-push.ts && prisma db push --skip-generate && prisma db seed && next build`. `pre-push.ts` là bước chuyển đổi dữ liệu idempotent (single-user → multi-user, onboardedAt…).
 - **Tính năng đã có:** đa tài khoản (admin/user, admin tạo tài khoản, bắt đổi mật khẩu lần đầu, admin "xem dữ liệu" chỉ đọc), onboarding 3 bước, ăn uống (kho 282 món Việt, tìm không dấu, chọn khẩu phần, "Ăn lại", chống lưu trùng), tập luyện (MET, set/rep, thư viện bài tập, tiến độ 1RM), cơ thể (cân nặng, số đo, ảnh tiến trình), phân tích (TDEE thích nghi, biểu đồ theo tuần, báo cáo tuần AI), connector Claude OAuth 2.1 cá nhân (`/api/mcp`) và nhóm dùng chung (`/api/mcp/shared/<groupId>`). Mọi công cụ MCP nhận `profile_username` rõ ràng (ví dụ `bm_demo_an`), kiểm tra quyền theo user và trả username đã chọn.
-- **Thay đổi local chưa push/deploy:** nhóm Claude dùng chung nhiều hồ sơ. Mỗi user tự tham gia bằng mã; chủ nhóm kết nối một Claude account; công cụ MCP yêu cầu username hồ sơ tường minh và kiểm tra membership ở mỗi lần gọi. OAuth E2E local bao phủ hai user và username đích.
+- **GitHub chưa đồng bộ:** `main` local đang đi trước `origin/main` 7 commit; không push trong lượt này. Production đã được deploy trực tiếp từ local commit `afd37ab`.
+- **Claude dùng chung nhiều hồ sơ:** mỗi user tự tham gia bằng mã; chủ nhóm kết nối một Claude account; công cụ MCP yêu cầu username hồ sơ tường minh và kiểm tra membership ở mỗi lần gọi. OAuth E2E local bao phủ hai user và username đích.
 
 ## 2. Việc đang làm dở (ưu tiên)
 
 ### 2.1 Ảnh bữa ăn và món trùng (đã sửa local, chưa kiểm tra production)
 - Route `src/app/api/uploads/[...path]/route.ts` không redirect nữa: trả 401/404 cho request ảnh chưa xác thực/không thuộc user. Regression tests ở `scripts/upload-route.test.ts`.
 - Chặn lưu món trùng y hệt trong cùng bữa; tests ở `scripts/meal-duplicates.test.ts`.
-- Các thay đổi đã commit local trước đó (`026d510`, `a6cfe8d`). Không đăng nhập hoặc đọc/sửa dữ liệu production theo yêu cầu người dùng; cần xác nhận trước khi push/deploy.
+- Các thay đổi đã deploy cùng `afd37ab` (ban đầu commit local `026d510`, `a6cfe8d`). Không đăng nhập hoặc đọc/sửa nhật ký người dùng production; ảnh chưa được kiểm tra thủ công trên production.
 
 ### 2.2 AI ảnh bữa ăn và tập luyện (đã làm local)
 - Nút AI bữa ăn rõ ràng; nếu thiếu `ANTHROPIC_API_KEY`, hướng dẫn dùng Claude connector. Phân tích ảnh ngay trong app vẫn cần key này; Claude connector không thay thế API key server.
