@@ -13,7 +13,11 @@ export interface SessionUser {
   name: string;
   role: Role;
   sessionVer: number;
+  mustChangePassword: boolean; // still on the password an admin set
 }
+
+/** Standalone page where users replace an admin-set password before anything else. */
+export const CHANGE_PASSWORD_PATH = "/doi-mat-khau";
 
 /** Admins can open another user's data read-only; the target user id lives in this cookie. */
 export const VIEW_AS_COOKIE = "bm_view_as";
@@ -24,16 +28,33 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   if (!claims) return null;
   const user = await db.user.findUnique({
     where: { id: claims.sub },
-    select: { id: true, username: true, name: true, role: true, active: true, sessionVer: true },
+    select: { id: true, username: true, name: true, role: true, active: true, sessionVer: true, mustChangePassword: true },
   });
   if (!user || !user.active || user.sessionVer !== claims.ver) return null;
-  return { id: user.id, username: user.username, name: user.name, role: user.role === "admin" ? "admin" : "user", sessionVer: user.sessionVer };
+  return {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role === "admin" ? "admin" : "user",
+    sessionVer: user.sessionVer,
+    mustChangePassword: user.mustChangePassword,
+  };
 }
 
+/**
+ * The signed-in user of the app and admin areas. Someone still on an admin-set password is sent
+ * to change it first, so every page, action and photo behind this stays closed until then.
+ */
 export async function requireUser(): Promise<SessionUser> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (user.mustChangePassword) redirect(CHANGE_PASSWORD_PATH);
   return user;
+}
+
+/** The change-password page, returning to `next` afterwards. */
+export function changePasswordUrl(next: string): string {
+  return next === "/" ? CHANGE_PASSWORD_PATH : `${CHANGE_PASSWORD_PATH}?next=${encodeURIComponent(next)}`;
 }
 
 export async function requireAdmin(): Promise<SessionUser> {
@@ -114,5 +135,7 @@ export async function ensureBootstrapUser(): Promise<"exists" | "created" | "mis
  * login; anything else falls back to "/". "/\" counts as protocol-relative in browsers.
  */
 export function safeNext(next: unknown): string {
-  return typeof next === "string" && /^\/(?![/\\])/.test(next) && !next.startsWith("/login") ? next : "/";
+  return typeof next === "string" && /^\/(?![/\\])/.test(next) && !next.startsWith("/login") && !next.startsWith(CHANGE_PASSWORD_PATH)
+    ? next
+    : "/";
 }

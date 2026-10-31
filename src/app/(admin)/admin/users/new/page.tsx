@@ -11,7 +11,7 @@ export default async function NewUserPage() {
     <div className="max-w-xl">
       <PageHeader
         title="Thêm người dùng"
-        subtitle="Người dùng đăng nhập bằng tên và mật khẩu bạn đặt, rồi có thể tự đổi mật khẩu trong Hồ sơ."
+        subtitle="Bạn đặt mật khẩu tạm; ở lần đăng nhập đầu, người dùng phải đổi sang mật khẩu của riêng mình."
         action={
           <LinkButton href="/admin" variant="ghost">
             <ArrowLeft className="size-4" /> Danh sách

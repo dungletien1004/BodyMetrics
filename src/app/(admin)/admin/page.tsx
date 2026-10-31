@@ -6,9 +6,16 @@ import { getAdminOverview, getUserStats, parseRange, WEIGHT_RANGES, type UserSta
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { num } from "@/lib/format";
-import { lastActivityLabel, RoleBadge, StatusBadge, ViewAsButton, Weight, WeightChange } from "./user-bits";
+import { ActivityBadge, lastActivityLabel, MustChangeBadge, RoleBadge, StatusBadge, ViewAsButton, Weight, WeightChange } from "./user-bits";
 
 export const dynamic = "force-dynamic";
+
+type Sort = "created" | "activity";
+
+const SORTS: { value: Sort; label: string }[] = [
+  { value: "created", label: "Ngày tạo" },
+  { value: "activity", label: "Lâu chưa ghi" },
+];
 
 const EMPTY: UserStats = { meals: 0, workouts: 0, bodyLogs: 0, lastActivity: null, latestWeight: null, latestWeightDate: null, weightChange: null };
 
@@ -17,6 +24,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
   const sp = await searchParams;
   const q = (sp.q ?? "").trim();
   const range = parseRange(sp.range);
+  const sort: Sort = sp.sort === "activity" ? "activity" : "created";
 
   const [overview, users] = await Promise.all([
     getAdminOverview(),
@@ -25,7 +33,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
         ? { OR: [{ username: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] }
         : undefined,
       orderBy: { createdAt: "asc" },
-      select: { id: true, username: true, name: true, role: true, active: true, createdAt: true },
+      select: { id: true, username: true, name: true, role: true, active: true, mustChangePassword: true, createdAt: true },
     }),
   ]);
   const stats = await getUserStats(
@@ -33,7 +41,21 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
     range,
   );
   const rows = users.map((u) => ({ ...u, stats: stats.get(u.id) ?? EMPTY }));
-  const rangeHref = (r: number) => `/admin?${new URLSearchParams({ ...(q ? { q } : {}), range: String(r) })}`;
+  if (sort === "activity") {
+    // Longest without a log first; never logged at all comes before everything else.
+    rows.sort((a, b) => (a.stats.lastActivity ?? "").localeCompare(b.stats.lastActivity ?? ""));
+  }
+  const href = (change: { range?: number; sort?: Sort }) => {
+    const next = { range: change.range ?? range, sort: change.sort ?? sort };
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (next.range !== 7) params.set("range", String(next.range));
+    if (next.sort !== "created") params.set("sort", next.sort);
+    const qs = params.toString();
+    return qs ? `/admin?${qs}` : "/admin";
+  };
+  const segment = (active: boolean) =>
+    cn("rounded-lg px-2.5 py-1 whitespace-nowrap", active ? "bg-accent/10 font-medium text-accent" : "text-muted hover:bg-surface-2");
 
   return (
     <>
@@ -60,28 +82,43 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
         <Stat label="Buổi tập 7 ngày" value={num(overview.workouts7d, 0)} tone="burn" />
       </Card>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <form action="/admin" className="flex min-w-0 flex-1 gap-2 sm:max-w-sm">
+      {/* Phones: search on its own full-width row, the toggles below it. */}
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
+        <form action="/admin" className="flex w-full min-w-0 gap-2 lg:max-w-sm">
           {range !== 7 && <input type="hidden" name="range" value={range} />}
+          {sort !== "created" && <input type="hidden" name="sort" value={sort} />}
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
-            <Input name="q" defaultValue={q} placeholder="Tìm theo tên hoặc tên đăng nhập" aria-label="Tìm người dùng" style={{ paddingLeft: "2.25rem" }} />
+            <Input
+              type="search"
+              name="q"
+              defaultValue={q}
+              placeholder="Tên hoặc tên đăng nhập"
+              aria-label="Tìm người dùng theo tên hoặc tên đăng nhập"
+              style={{ paddingLeft: "2.25rem" }}
+            />
           </div>
           <Button type="submit" variant="secondary">
             Tìm
           </Button>
         </form>
-        <div className="flex items-center gap-1 text-sm" role="group" aria-label="Khoảng thay đổi cân nặng">
-          <span className="mr-1 text-muted">Thay đổi cân:</span>
-          {WEIGHT_RANGES.map((r) => (
-            <Link
-              key={r}
-              href={rangeHref(r)}
-              className={cn("rounded-lg px-2.5 py-1", r === range ? "bg-accent/10 font-medium text-accent" : "text-muted hover:bg-surface-2")}
-            >
-              {r} ngày
-            </Link>
-          ))}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <div className="flex items-center gap-1" role="group" aria-label="Khoảng thay đổi cân nặng">
+            <span className="mr-1 text-muted">Thay đổi cân:</span>
+            {WEIGHT_RANGES.map((r) => (
+              <Link key={r} href={href({ range: r })} className={segment(r === range)} aria-current={r === range || undefined}>
+                {r} ngày
+              </Link>
+            ))}
+          </div>
+          <div className="flex items-center gap-1" role="group" aria-label="Sắp xếp">
+            <span className="mr-1 text-muted">Sắp xếp:</span>
+            {SORTS.map((o) => (
+              <Link key={o.value} href={href({ sort: o.value })} className={segment(o.value === sort)} aria-current={o.value === sort || undefined}>
+                {o.label}
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -109,6 +146,8 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <RoleBadge role={u.role} />
                     <StatusBadge active={u.active} />
+                    <ActivityBadge lastActivity={u.stats.lastActivity} createdAt={u.createdAt} active={u.active} />
+                    {u.mustChangePassword && <MustChangeBadge />}
                   </div>
                   <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
                     <div>
@@ -116,9 +155,16 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                       <dd>{lastActivityLabel(u.stats.lastActivity)}</dd>
                     </div>
                     <div>
-                      <dt className="text-xs text-muted">Cân nặng · {range} ngày</dt>
-                      <dd className="flex flex-wrap gap-x-2">
-                        <Weight value={u.stats.latestWeight} /> <WeightChange value={u.stats.weightChange} />
+                      <dt className="text-xs text-muted">Cân nặng ({range} ngày)</dt>
+                      <dd>
+                        {u.stats.latestWeight == null ? (
+                          <Weight value={null} />
+                        ) : (
+                          <div className="flex flex-wrap gap-x-2">
+                            <Weight value={u.stats.latestWeight} />
+                            <WeightChange value={u.stats.weightChange} latestDate={u.stats.latestWeightDate} range={range} />
+                          </div>
+                        )}
                       </dd>
                     </div>
                     <div className="col-span-2">
@@ -145,12 +191,16 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                   <th className="px-4 py-3 font-medium">Người dùng</th>
                   <th className="px-3 py-3 font-medium">Vai trò</th>
                   <th className="px-3 py-3 font-medium">Ngày tạo</th>
-                  <th className="px-3 py-3 font-medium">Hoạt động gần nhất</th>
+                  <th className="px-3 py-3 font-medium">
+                    <Link href={href({ sort: sort === "activity" ? "created" : "activity" })} className="hover:text-foreground" title="Sắp xếp theo lần ghi gần nhất">
+                      Hoạt động gần nhất{sort === "activity" && " ↑"}
+                    </Link>
+                  </th>
                   <th className="px-3 py-3 text-right font-medium" title="Bữa ăn / buổi tập / lần cân đo">
                     Ăn / Tập / Cân
                   </th>
                   <th className="px-3 py-3 text-right font-medium">Cân nặng</th>
-                  <th className="px-3 py-3 text-right font-medium">{range} ngày</th>
+                  <th className="px-3 py-3 text-right font-medium">Thay đổi {range} ngày</th>
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
@@ -170,10 +220,16 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                       <div className="flex flex-col items-start gap-1">
                         <RoleBadge role={u.role} />
                         {!u.active && <StatusBadge active={false} />}
+                        {u.mustChangePassword && <MustChangeBadge />}
                       </div>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-muted">{format(u.createdAt, "dd/MM/yyyy")}</td>
-                    <td className="px-3 py-3">{lastActivityLabel(u.stats.lastActivity)}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex flex-col items-start gap-1">
+                        {lastActivityLabel(u.stats.lastActivity)}
+                        <ActivityBadge lastActivity={u.stats.lastActivity} createdAt={u.createdAt} active={u.active} />
+                      </div>
+                    </td>
                     <td className="px-3 py-3 text-right whitespace-nowrap tabular-nums">
                       {u.stats.meals} / {u.stats.workouts} / {u.stats.bodyLogs}
                     </td>
@@ -181,7 +237,11 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                       <Weight value={u.stats.latestWeight} />
                     </td>
                     <td className="px-3 py-3 text-right">
-                      <WeightChange value={u.stats.weightChange} />
+                      {u.stats.latestWeight == null ? (
+                        <span className="text-muted">–</span>
+                      ) : (
+                        <WeightChange value={u.stats.weightChange} latestDate={u.stats.latestWeightDate} range={range} />
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end">
