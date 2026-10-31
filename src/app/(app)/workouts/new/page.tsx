@@ -3,7 +3,7 @@ import { WorkoutBuilder } from "@/components/workouts/workout-builder";
 import { isDayKey, todayKey } from "@/lib/dates";
 import { getWeightOn } from "@/lib/summary";
 import { payloadFromWorkout, timeOfDay, type WorkoutPayload } from "@/lib/workouts";
-import { getExerciseOptions, getWorkout } from "../queries";
+import { getExerciseHabits, getExerciseOptions, getWorkout } from "../queries";
 import { getViewer } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -20,15 +20,19 @@ export default async function NewWorkoutPage({ searchParams }: { searchParams: P
     ? payloadFromWorkout(source, { date, startTime, kcalOverride: null, note: "" }) // watch reading and note belong to the original
     : { date, startTime, durationMin: null, kcalOverride: null, note: "", entries: [] };
 
-  const [exercises, weight] = await Promise.all([getExerciseOptions(userId), getWeightOn(userId, date)]);
+  const [exercises, habits, weight] = await Promise.all([
+    getExerciseOptions(userId),
+    getExerciseHabits(userId),
+    getWeightOn(userId, date),
+  ]);
 
   return (
     <>
       <PageHeader
         title={source ? "Lặp lại buổi tập" : "Buổi tập mới"}
-        subtitle={source ? "Đã điền sẵn từ buổi trước - chỉnh số set, tạ rồi lưu." : "Chọn bài tập, nhập set hoặc thời gian. Calo được tính lại khi lưu."}
+        subtitle={source ? "Đã điền sẵn từ buổi trước - chỉnh số set, tạ rồi lưu." : "Chọn bài tập rồi nhập set hoặc số phút."}
       />
-      <WorkoutBuilder exercises={exercises} initial={initial} initialWeightKg={weight} />
+      <WorkoutBuilder exercises={exercises} habits={habits} initial={initial} initialWeightKg={weight} />
     </>
   );
 }
