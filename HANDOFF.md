@@ -21,6 +21,8 @@ Tài liệu bàn giao để một AI/dev khác tiếp tục. Đọc kèm `CLAUDE
 ### 2.2 Phân tích ảnh qua Claude Web connector
 - Phân tích trực tiếp trong app đã được gỡ để không cần `ANTHROPIC_API_KEY`.
 - Ảnh gửi trong chat Claude không chuyển được sang BodyMetrics. Luồng tự gắn ảnh: chụp ở mục "Gửi ảnh cho Claude" trên `/meals` (ảnh chờ, giữ 3 ngày), rồi nói với Claude "Ghi bữa ăn từ ảnh mới trong BodyMetrics cho hồ sơ <username>". Claude gọi `list_new_photos`, `get_photo` (trả ảnh JPEG ≤1024px) rồi `log_meal` kèm `photo_id`, ảnh tự gắn vào bữa.
+- Ảnh gửi trong chat Claude: sau `log_meal`/`log_workout` Claude gọi `attach_photo`, nhận `upload_url` ký HS256 (khóa riêng suy ra từ AUTH_SECRET, hạn 30 phút, gắn với đúng một bữa/buổi tập) rồi dùng code execution `curl -F photo=@...` lên `/api/photo-upload/<token>` (route public trong middleware). Cần người dùng bật "Code execution and file creation" và cho phép tên miền app trong Settings → Capabilities của claude.ai. `attach_photo` cũng nhận `image_url` (chặn IP nội bộ, kiểm tra lại sau redirect, tối đa 20 MB).
+- Buổi tập có ảnh (`Photo.workoutId`, kind `workout`), thẻ "Ảnh buổi tập" trên `/workouts/<id>`, lọc "Tập luyện" trong thư viện ảnh.
 - Mỗi bữa trong kết quả MCP có `add_photo_url` (`/meals/<id>#anh-bua-an`) và số ảnh; trang chi tiết bữa ăn có thẻ "Ảnh bữa ăn" để thêm/xóa ảnh cho bữa đã lưu.
 - Tạo báo cáo tuần mới cũng thực hiện trong chat Claude; các báo cáo cũ đã lưu vẫn hiển thị.
 - Connector cá nhân dùng `/api/mcp`; nhóm dùng chung cần các user tham gia bằng mã trước khi chủ nhóm kết nối. `list_profiles` trả username BodyMetrics, mọi tool đọc/ghi/xóa yêu cầu `profile_username`; membership được kiểm tra lại cho từng thao tác. Mỗi thành viên có thể rời nhóm hoặc được gỡ.

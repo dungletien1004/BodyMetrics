@@ -6,6 +6,16 @@ import { isDayKey, shiftDay, todayKey } from "../dates";
 import { db } from "../db";
 import { getDaySummaries, getDaySummary, getProfile, getWeightOn } from "../summary";
 import { deleteImage, imageAsJpegBase64 } from "../storage";
+import {
+  attachPhotos,
+  deletePhotosOf,
+  fetchImageFromUrl,
+  linkPendingPhoto,
+  photoPagePath,
+  signUploadToken,
+  UPLOAD_LINK_MINUTES,
+  type PhotoTarget,
+} from "../photos";
 
 // Tools Claude (claude.ai connector) uses to read and write the user's log.
 // Claude looks at the photo in the chat itself and sends the structured result here.
@@ -18,9 +28,10 @@ export const MCP_INSTRUCTIONS = `BodyMetrics là nhật ký giảm cân của ng
 - Ảnh cân hoặc số đo: gọi log_body.
 - Ngày mặc định là hôm nay theo giờ của người dùng; chỉ truyền date (YYYY-MM-DD) khi họ nói ngày khác.
 - Sau khi ghi, tóm tắt ngắn những gì đã lưu và lượng calo còn lại trong ngày (có trong kết quả trả về).
-- Ảnh chụp trong BodyMetrics: khi người dùng nói đã chụp/lưu ảnh trong BodyMetrics (hoặc "ảnh mới", "ảnh vừa chụp"), gọi list_new_photos, rồi get_photo để xem từng ảnh, phân tích như trên và gọi log_meal kèm photo_id để ảnh tự gắn vào bữa. Mỗi ảnh chỉ ghi một bữa.
-- Ảnh gửi trong chat Claude: connector không chuyển được file ảnh sang BodyMetrics. Sau khi ghi, gửi link add_photo_url để người dùng tự gắn ảnh, hoặc gợi ý lần sau chụp trong BodyMetrics (nút "Để Claude phân tích") để ảnh tự gắn.
-- Muốn gắn ảnh cho bữa đã ghi: KHÔNG ghi lại bữa. Gọi get_day_summary và gửi add_photo_url của đúng bữa đó.
+- Ảnh chụp trong BodyMetrics: khi người dùng nói đã chụp/lưu ảnh trong BodyMetrics (hoặc "ảnh mới", "ảnh vừa chụp"), gọi list_new_photos, rồi get_photo để xem từng ảnh, phân tích như trên và gọi log_meal (hoặc log_workout nếu là ảnh buổi tập) kèm photo_id để ảnh tự gắn. Mỗi ảnh chỉ dùng cho một bản ghi.
+- Ảnh gửi trong chat Claude: sau khi log_meal / log_workout từ ảnh đó, LUÔN tự gắn ảnh vào bản ghi vừa lưu mà không cần hỏi: gọi attach_photo (meal_id hoặc workout_id) để lấy upload_url, rồi dùng công cụ chạy code (code execution) tải đúng file ảnh người dùng gửi lên upload_url theo lệnh trong kết quả. Kiểm tra phản hồi có "ok": true. Nếu không có công cụ chạy code hoặc bị chặn mạng, nói ngắn gọn người dùng bật "Code execution and file creation" và cho phép tên miền của BodyMetrics trong Settings → Capabilities, kèm link manual_url để tự gắn.
+- Người dùng gửi link ảnh (http/https trực tiếp tới file ảnh): gọi attach_photo kèm image_url.
+- Muốn gắn ảnh cho bữa ăn/buổi tập đã ghi: KHÔNG ghi lại. Lấy id từ get_day_summary rồi dùng attach_photo như trên.
 - Chỉ xóa (delete_meal / delete_workout / delete_body_log) khi người dùng yêu cầu rõ ràng, ví dụ sửa một bản ghi vừa ghi nhầm. Không tự ý xóa để dọn dẹp hay ghi đè; nếu chưa chắc bản ghi nào, hỏi lại trước.
 - Không đưa lời khuyên y khoa.`;
 
@@ -70,8 +81,8 @@ function appOrigin(ctx: ToolContext): string | null {
   return typeof origin === "string" && /^https?:\/\//.test(origin) ? origin : null;
 }
 
-function mealPhotoUrl(origin: string | null, mealId: string): string | null {
-  return origin ? `${origin}/meals/${mealId}#anh-bua-an` : null;
+function pageUrl(origin: string | null, t: PhotoTarget): string | null {
+  return origin ? origin + photoPagePath(t) : null;
 }
 
 /** Food photos saved in BodyMetrics for Claude that no meal uses yet (kept 3 days). */
@@ -129,7 +140,11 @@ async function dayOverview(userId: string, date: string, origin: string | null) 
       orderBy: { eatenAt: "asc" },
       include: { items: true, _count: { select: { photos: true } } },
     }),
-    db.workout.findMany({ where: { userId, date }, orderBy: { startedAt: "asc" }, include: { entries: { include: { exercise: true } } } }),
+    db.workout.findMany({
+      where: { userId, date },
+      orderBy: { startedAt: "asc" },
+      include: { entries: { include: { exercise: true } }, _count: { select: { photos: true } } },
+    }),
   ]);
   return {
     date,
@@ -150,13 +165,15 @@ async function dayOverview(userId: string, date: string, origin: string | null) 
       kcal: Math.round(m.items.reduce((a, i) => a + i.kcal, 0)),
       items: m.items.map((i) => `${i.name}${i.portionG ? ` ${i.portionG}g` : ""} ${Math.round(i.kcal)} kcal`),
       photos: m._count.photos,
-      add_photo_url: mealPhotoUrl(origin, m.id),
+      add_photo_url: pageUrl(origin, { kind: "meal", id: m.id }),
     })),
     workouts: workouts.map((w) => ({
       id: w.id,
       minutes: w.durationMin,
       kcal: Math.round(w.kcalOverride ?? w.entries.reduce((a, e) => a + e.kcal, 0)),
       exercises: w.entries.map((e) => e.exercise.name),
+      photos: w._count.photos,
+      add_photo_url: pageUrl(origin, { kind: "workout", id: w.id }),
     })),
   };
 }
@@ -288,7 +305,7 @@ export function registerTools(server: McpServer) {
       });
       // A photo saved in BodyMetrics and read with get_photo is attached here; one photo, one meal.
       const attached = photo_id
-        ? (await db.photo.updateMany({ where: { id: photo_id, userId, kind: "food", mealId: null }, data: { mealId: meal.id, date: d } })).count > 0
+        ? await linkPendingPhoto(userId, photo_id, { kind: "meal", id: meal.id }, d)
         : false;
       const origin = appOrigin(ctx);
       return json({
@@ -296,9 +313,58 @@ export function registerTools(server: McpServer) {
         saved_meal_id: meal.id,
         photo_attached: attached,
         ...(photo_id && !attached ? { photo_note: "photo_id không còn hợp lệ (đã gắn vào bữa khác hoặc đã xóa)." } : {}),
-        // Chat photos can't travel through the connector; the user attaches one on this page.
-        add_photo_url: mealPhotoUrl(origin, meal.id),
+        add_photo_url: pageUrl(origin, { kind: "meal", id: meal.id }),
         day: await dayOverview(userId, d, origin),
+      });
+    },
+  );
+
+  server.registerTool(
+    "attach_photo",
+    {
+      title: "Gắn ảnh vào bữa ăn / buổi tập",
+      description:
+        "Gắn ảnh vào bữa ăn (meal_id) hoặc buổi tập (workout_id) đã lưu. Có image_url (link trực tiếp tới file ảnh) thì BodyMetrics tự tải và gắn ngay. Không có image_url thì trả upload_url có hiệu lực ${UPLOAD_LINK_MINUTES} phút: dùng công cụ chạy code tải file ảnh người dùng gửi trong chat lên đó.",
+      inputSchema: z.object({
+        profile_username: profileUsernameField,
+        meal_id: z.string().optional(),
+        workout_id: z.string().optional(),
+        image_url: z.string().url().optional().describe("Link http(s) trực tiếp tới file ảnh, nếu người dùng đưa link"),
+      }),
+    },
+    async ({ profile_username, meal_id, workout_id, image_url }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      if (Boolean(meal_id) === Boolean(workout_id)) return fail("Truyền đúng một trong meal_id hoặc workout_id.");
+      const target: PhotoTarget = meal_id ? { kind: "meal", id: meal_id } : { kind: "workout", id: workout_id! };
+      const exists = meal_id
+        ? await db.meal.count({ where: { id: meal_id, userId: profile.userId } })
+        : await db.workout.count({ where: { id: workout_id, userId: profile.userId } });
+      if (!exists) return fail(meal_id ? "Không tìm thấy bữa ăn." : "Không tìm thấy buổi tập.");
+      const origin = appOrigin(ctx);
+      const manualUrl = pageUrl(origin, target);
+
+      if (image_url) {
+        let file: File;
+        try {
+          file = await fetchImageFromUrl(image_url);
+        } catch (err) {
+          return fail(`${err instanceof Error ? err.message : "Không tải được ảnh."} Người dùng có thể tự gắn ảnh tại: ${manualUrl ?? ""}`);
+        }
+        const res = await attachPhotos(profile.userId, target, [file]);
+        if (!res.ok) return fail(res.error);
+        return json({ profile_username: profile.profileUsername, photo_attached: true, photo_id: res.photoIds[0], view_url: manualUrl });
+      }
+
+      if (!origin) return fail("Không xác định được địa chỉ BodyMetrics để tạo link tải ảnh.");
+      const uploadUrl = `${origin}/api/photo-upload/${await signUploadToken(profile.userId, target)}`;
+      return json({
+        profile_username: profile.profileUsername,
+        upload_url: uploadUrl,
+        expires_in_minutes: UPLOAD_LINK_MINUTES,
+        how_to_upload:
+          "Trong công cụ chạy code: tìm file ảnh người dùng gửi (thường ở /mnt/user-data/uploads/, dùng ls), rồi chạy lệnh dưới với đường dẫn file đó. Ảnh trên 4 MB thì thu nhỏ trước (Pillow, cạnh dài 1600px, JPEG). Phản hồi thành công có \"ok\": true.",
+        command: `curl -sS -X POST -F "photo=@<duong_dan_file_anh>" "${uploadUrl}"`,
+        manual_url: manualUrl,
       });
     },
   );
@@ -399,9 +465,10 @@ export function registerTools(server: McpServer) {
         duration_min: n(1440).optional().describe("Tổng thời gian; mặc định tổng phút các bài"),
         kcal_override: n(10000).optional().describe("Calo từ đồng hồ thông minh"),
         note: z.string().max(2000).optional(),
+        photo_id: z.string().optional().describe("photo_id từ list_new_photos khi buổi tập được ghi từ ảnh đã lưu trong BodyMetrics"),
       }),
     },
-    async ({ profile_username, entries, date, start_time, duration_min, kcal_override, note }, ctx) => {
+    async ({ profile_username, entries, date, start_time, duration_min, kcal_override, note, photo_id }, ctx) => {
       const profile = await actingProfile(ctx, profile_username);
       const userId = profile.userId;
       const d = date ?? todayKey();
@@ -448,6 +515,8 @@ export function registerTools(server: McpServer) {
         profile_username: profile.profileUsername,
         saved_workout_id: workout.id,
         exercises: workout.entries.map((e) => ({ name: e.exercise.name, kcal: e.kcal })),
+        ...(photo_id ? { photo_attached: await linkPendingPhoto(userId, photo_id, { kind: "workout", id: workout.id }, d) } : {}),
+        add_photo_url: pageUrl(appOrigin(ctx), { kind: "workout", id: workout.id }),
         day: await dayOverview(userId, d, appOrigin(ctx)),
       });
     },
@@ -511,6 +580,7 @@ export function registerTools(server: McpServer) {
       const userId = profile.userId;
       const w = await db.workout.findFirst({ where: { id, userId } });
       if (!w) return fail("Không tìm thấy buổi tập.");
+      await deletePhotosOf(userId, { kind: "workout", id });
       await db.workout.delete({ where: { id } });
       return json({ profile_username: profile.profileUsername, deleted_workout_id: id, day: await dayOverview(userId, w.date, appOrigin(ctx)) });
     },

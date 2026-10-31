@@ -95,7 +95,7 @@ model Photo {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  kind      String // food | body
+  kind      String // food | body | workout
   path      String // ImageBlob id, served at /api/uploads/<path>
   width     Int
   height    Int
@@ -105,6 +105,8 @@ model Photo {
   meal      Meal?    @relation(fields: [mealId], references: [id], onDelete: SetNull)
   bodyLogId String?
   bodyLog   BodyLog? @relation(fields: [bodyLogId], references: [id], onDelete: SetNull)
+  workoutId String?
+  workout   Workout? @relation(fields: [workoutId], references: [id], onDelete: SetNull)
 
   @@index([userId, date, kind])
 }
@@ -165,6 +167,7 @@ model Workout {
   kcalOverride Float?
   createdAt    DateTime       @default(now())
   entries      WorkoutEntry[]
+  photos       Photo[]
 
   @@index([userId, date])
 }

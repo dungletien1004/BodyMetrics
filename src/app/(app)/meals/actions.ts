@@ -10,6 +10,7 @@ import { isMealType, MEAL_TYPES } from "@/components/meals/types";
 import { requireWriter } from "@/lib/auth";
 import { isDayKey, shiftDay, todayKey } from "@/lib/dates";
 import { db } from "@/lib/db";
+import { attachPhotos, removeAttachedPhoto } from "@/lib/photos";
 import { hasDuplicateMealItems } from "@/lib/meals";
 import { deleteImage, saveImage, uploadUrl } from "@/lib/storage";
 
@@ -73,7 +74,7 @@ export async function uploadMealPhoto(form: FormData): Promise<UploadMealPhotoRe
 /** Food photos no meal took within PENDING_PHOTO_DAYS (abandoned forms, or left for Claude and never logged). */
 async function cleanupAbandonedPhotos(userId: string) {
   const stale = await db.photo.findMany({
-    where: { userId, kind: "food", mealId: null, bodyLogId: null, takenAt: { lt: new Date(Date.now() - PENDING_PHOTO_DAYS * 24 * 3600 * 1000) } },
+    where: { userId, kind: "food", mealId: null, workoutId: null, bodyLogId: null, takenAt: { lt: new Date(Date.now() - PENDING_PHOTO_DAYS * 24 * 3600 * 1000) } },
   });
   if (!stale.length) return;
   await db.photo.deleteMany({ where: { id: { in: stale.map((p) => p.id) } } });
@@ -122,40 +123,22 @@ function parseMeal(input: MealInput): ParseMealResult {
 
 export type SaveMealResult = { error: string } | undefined;
 
-export type MealPhotoResult = { ok: true; added: number } | { ok: false; error: string };
-
-const MAX_PHOTOS_PER_MEAL = 6;
+export type EntryPhotoResult = { ok: true; added: number } | { ok: false; error: string };
 
 /** Attach one or more photos to an already saved meal (e.g. one logged through Claude). */
-export async function addMealPhotos(mealId: string, form: FormData): Promise<MealPhotoResult> {
+export async function addMealPhotos(mealId: string, form: FormData): Promise<EntryPhotoResult> {
   const userId = await requireWriter();
-  const meal = await db.meal.findFirst({ where: { id: mealId, userId }, select: { id: true, date: true, _count: { select: { photos: true } } } });
-  if (!meal) return { ok: false, error: "Không tìm thấy bữa ăn." };
   const files = form.getAll("photos").filter((f): f is File => f instanceof File && f.size > 0);
-  if (!files.length) return { ok: false, error: "Chưa chọn ảnh." };
-  if (meal._count.photos + files.length > MAX_PHOTOS_PER_MEAL) {
-    return { ok: false, error: `Mỗi bữa tối đa ${MAX_PHOTOS_PER_MEAL} ảnh.` };
-  }
-  try {
-    for (const file of files) {
-      const stored = await saveImage(file, userId);
-      await db.photo.create({ data: { ...stored, userId, kind: "food", date: meal.date, mealId: meal.id } });
-    }
-  } catch (err) {
-    return { ok: false, error: err instanceof Error && err.message ? err.message : "Không lưu được ảnh." };
-  }
+  const res = await attachPhotos(userId, { kind: "meal", id: mealId }, files);
+  if (!res.ok) return res;
   revalidateAll();
-  return { ok: true, added: files.length };
+  return { ok: true, added: res.photoIds.length };
 }
 
-/** Remove one photo from a saved meal, with its stored image. */
-export async function removeMealPhoto(photoId: string): Promise<void> {
+/** Remove one photo from a saved meal or workout, with its stored image. */
+export async function removeEntryPhoto(photoId: string): Promise<void> {
   const userId = await requireWriter();
-  const photo = await db.photo.findFirst({ where: { id: photoId, userId, mealId: { not: null } } });
-  if (!photo) return;
-  await db.photo.delete({ where: { id: photo.id } });
-  await deleteImage(photo.path, userId);
-  revalidateAll();
+  if (await removeAttachedPhoto(userId, photoId)) revalidateAll();
 }
 
 export async function createMeal(input: MealInput): Promise<SaveMealResult> {

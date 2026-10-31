@@ -2,10 +2,13 @@ import { ArrowLeft, Pencil, Repeat } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, Card, LinkButton, PageHeader, Stat } from "@/components/ui";
+import { EntryPhotos } from "@/components/entry-photos";
 import { DeleteWorkoutButton } from "@/components/workouts/delete-workout-button";
 import { INTENSITY_LABEL } from "@/lib/calc";
 import { formatDayLong, formatDayShort, weekStartKey } from "@/lib/dates";
 import { kcal, num } from "@/lib/format";
+import { uploadUrl } from "@/lib/storage";
+import { db } from "@/lib/db";
 import { categoryLabel, epley1RM, isIntensity, setsVolume, timeOfDay, workoutKcal } from "@/lib/workouts";
 import { getWorkout } from "../queries";
 import { getViewer } from "@/lib/auth";
@@ -15,7 +18,10 @@ export const dynamic = "force-dynamic";
 export default async function WorkoutPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { userId } = await getViewer();
-  const w = await getWorkout(userId, id);
+  const [w, photos] = await Promise.all([
+    getWorkout(userId, id),
+    db.photo.findMany({ where: { userId, workoutId: id }, orderBy: { takenAt: "asc" }, select: { id: true, path: true } }),
+  ]);
   if (!w) notFound();
 
   const estimate = w.entries.reduce((a, e) => a + e.kcal, 0);
@@ -62,6 +68,10 @@ export default async function WorkoutPage({ params }: { params: Promise<{ id: st
           {w.note}
         </Card>
       )}
+
+      <div className="mb-4">
+        <EntryPhotos kind="workout" id={w.id} photos={photos.map((p) => ({ id: p.id, url: uploadUrl(p.path) }))} />
+      </div>
 
       <div className="space-y-3">
         {w.entries.map((e, i) => (

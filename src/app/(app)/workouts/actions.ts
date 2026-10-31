@@ -6,6 +6,7 @@ import { z } from "zod";
 import { exerciseKcal } from "@/lib/calc";
 import { isDayKey } from "@/lib/dates";
 import { db } from "@/lib/db";
+import { attachPhotos, deletePhotosOf } from "@/lib/photos";
 import { getWeightOn } from "@/lib/summary";
 import { INTENSITIES, type WorkoutPayload } from "@/lib/workouts";
 import { getViewer, requireWriter } from "@/lib/auth";
@@ -92,9 +93,20 @@ export async function saveWorkout(id: string | null, input: WorkoutPayload): Pro
 
 export async function deleteWorkout(id: string, redirectTo?: string) {
   const userId = await requireWriter();
+  await deletePhotosOf(userId, { kind: "workout", id });
   await db.workout.deleteMany({ where: { id, userId } });
   revalidatePath("/", "layout");
   if (redirectTo?.startsWith("/workouts")) redirect(redirectTo);
+}
+
+/** Attach one or more photos (watch screen, machine display…) to a saved workout. */
+export async function addWorkoutPhotos(workoutId: string, form: FormData): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
+  const userId = await requireWriter();
+  const files = form.getAll("photos").filter((f): f is File => f instanceof File && f.size > 0);
+  const res = await attachPhotos(userId, { kind: "workout", id: workoutId }, files);
+  if (!res.ok) return res;
+  revalidatePath("/", "layout");
+  return { ok: true, added: res.photoIds.length };
 }
 
 /** Weight the server will use for a day, so the builder preview matches the saved numbers. */

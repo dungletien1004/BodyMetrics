@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 const KINDS = [
   { value: "all", label: "Tất cả" },
   { value: "food", label: "Món ăn" },
+  { value: "workout", label: "Tập luyện" },
   { value: "body", label: "Cơ thể" },
 ];
 
@@ -22,7 +23,7 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
 
   const { userId } = await getViewer();
   // Food photos only count once their meal is saved; unsaved uploads are cleaned up later.
-  const linked = { userId, OR: [{ kind: "body" }, { mealId: { not: null } }] };
+  const linked = { userId, OR: [{ kind: "body" }, { mealId: { not: null } }, { workoutId: { not: null } }] };
   const where = kind === "all" ? linked : { AND: [linked, { kind }] };
   const [photos, total] = await Promise.all([
     db.photo.findMany({
@@ -58,7 +59,7 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
       </div>
 
       {photos.length === 0 ? (
-        <EmptyState title="Chưa có ảnh nào">Ảnh món ăn và ảnh tiến trình bạn tải lên sẽ hiện ở đây.</EmptyState>
+        <EmptyState title="Chưa có ảnh nào">Ảnh món ăn, buổi tập và ảnh tiến trình bạn tải lên sẽ hiện ở đây.</EmptyState>
       ) : (
         <div className="space-y-4">
           {[...groups].map(([date, items]) => (
@@ -66,7 +67,7 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
               <h2 className="mb-3 text-sm font-medium">{formatDayLong(date)}</h2>
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-6">
                 {items.map((p) => {
-                  const href = p.mealId ? `/meals/${p.mealId}` : p.bodyLogId ? "/body" : uploadUrl(p.path);
+                  const href = p.mealId ? `/meals/${p.mealId}` : p.workoutId ? `/workouts/${p.workoutId}` : p.bodyLogId ? "/body" : uploadUrl(p.path);
                   return (
                     <Link key={p.id} href={href} className="group relative block overflow-hidden rounded-xl bg-surface-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -77,7 +78,7 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
                         className="aspect-square w-full object-cover transition group-hover:scale-105"
                       />
                       <span className="absolute bottom-1 left-1 rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] text-white">
-                        {p.kind === "food" ? "Món ăn" : "Cơ thể"}
+                        {p.kind === "food" ? "Món ăn" : p.kind === "workout" ? "Tập luyện" : "Cơ thể"}
                       </span>
                     </Link>
                   );

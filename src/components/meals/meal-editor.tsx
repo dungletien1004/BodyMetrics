@@ -1,7 +1,7 @@
 "use client";
 
 import { Camera, History, ImagePlus, Loader2, PenLine, Plus, Repeat, Search, Sparkles, Trash2, TriangleAlert, X } from "lucide-react";
-import { MealPhotos } from "./meal-photos";
+import { EntryPhotos } from "@/components/entry-photos";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -388,7 +388,7 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
         </div>
       </Card>
     ) : (
-      mealId && <MealPhotos mealId={mealId} photos={existingPhotos} />
+      mealId && <EntryPhotos kind="meal" id={mealId} photos={existingPhotos} />
     );
 
   return (

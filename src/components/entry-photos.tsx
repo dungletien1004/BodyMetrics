@@ -4,15 +4,22 @@ import { Camera, ImagePlus, Loader2, X } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
-import { addMealPhotos, removeMealPhoto } from "@/app/(app)/meals/actions";
+import { addMealPhotos, removeEntryPhoto } from "@/app/(app)/meals/actions";
+import { addWorkoutPhotos } from "@/app/(app)/workouts/actions";
 import { Button, Card, CardTitle } from "@/components/ui";
 import { downscaleImage } from "@/lib/client-image";
 
+const COPY = {
+  meal: { anchor: "anh-bua-an", title: "Ảnh bữa ăn", empty: "Bữa này chưa có ảnh. Thêm ảnh để xem lại sau, kể cả bữa đã ghi qua Claude.", confirm: "Xóa ảnh này khỏi bữa ăn?" },
+  workout: { anchor: "anh-buoi-tap", title: "Ảnh buổi tập", empty: "Buổi này chưa có ảnh. Thêm ảnh màn hình đồng hồ, máy chạy hoặc phòng tập.", confirm: "Xóa ảnh này khỏi buổi tập?" },
+};
+
 /**
- * Photos of a saved meal: add more (camera or library) or remove one. Meals logged through the
- * Claude connector arrive without a photo, so this is where it gets attached afterwards.
+ * Photos of a saved meal or workout: add more (camera or library) or remove one. Entries logged
+ * through the Claude connector may arrive without a photo, so this is where it gets attached.
  */
-export function MealPhotos({ mealId, photos }: { mealId: string; photos: { id: string; url: string }[] }) {
+export function EntryPhotos({ kind, id, photos }: { kind: "meal" | "workout"; id: string; photos: { id: string; url: string }[] }) {
+  const copy = COPY[kind];
   const router = useRouter();
   const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
@@ -30,7 +37,7 @@ export function MealPhotos({ mealId, photos }: { mealId: string; photos: { id: s
     try {
       const form = new FormData();
       for (const f of await Promise.all(picked.map(downscaleImage))) form.append("photos", f);
-      const res = await addMealPhotos(mealId, form);
+      const res = kind === "meal" ? await addMealPhotos(id, form) : await addWorkoutPhotos(id, form);
       if (!res.ok) setError(res.error);
       else router.refresh();
     } catch {
@@ -43,18 +50,18 @@ export function MealPhotos({ mealId, photos }: { mealId: string; photos: { id: s
     }
   }
 
-  function remove(id: string) {
-    if (!confirm("Xóa ảnh này khỏi bữa ăn?")) return;
+  function remove(photoId: string) {
+    if (!confirm(copy.confirm)) return;
     startRemoving(async () => {
-      await removeMealPhoto(id);
+      await removeEntryPhoto(photoId);
       router.refresh();
     });
   }
 
   return (
-    // scroll-mt: opened from Claude's link (#anh-bua-an), keep the title clear of the sticky top bar.
-    <Card id="anh-bua-an" className="scroll-mt-20">
-      <CardTitle>Ảnh bữa ăn</CardTitle>
+    // scroll-mt: opened from Claude's link (#anh-bua-an / #anh-buoi-tap), keep the title clear of the sticky top bar.
+    <Card id={copy.anchor} className="scroll-mt-20">
+      <CardTitle>{copy.title}</CardTitle>
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => void upload(e.target.files)} />
       <input ref={libraryRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void upload(e.target.files)} />
 
@@ -62,7 +69,7 @@ export function MealPhotos({ mealId, photos }: { mealId: string; photos: { id: s
         <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
           {photos.map((p) => (
             <div key={p.id} className="relative shrink-0">
-              <Image src={p.url} alt="Ảnh bữa ăn" width={320} height={240} unoptimized className="h-40 w-auto rounded-xl object-cover" />
+              <Image src={p.url} alt={copy.title} width={320} height={240} unoptimized className="h-40 w-auto rounded-xl object-cover" />
               <button
                 type="button"
                 onClick={() => remove(p.id)}
@@ -76,7 +83,7 @@ export function MealPhotos({ mealId, photos }: { mealId: string; photos: { id: s
           ))}
         </div>
       ) : (
-        <p className="mb-3 text-sm text-muted">Bữa này chưa có ảnh. Thêm ảnh để xem lại sau, kể cả bữa đã ghi qua Claude.</p>
+        <p className="mb-3 text-sm text-muted">{copy.empty}</p>
       )}
 
       <div className="flex flex-wrap items-center gap-2">

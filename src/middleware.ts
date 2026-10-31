@@ -2,8 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { readSession, SESSION_COOKIE } from "@/lib/auth/session";
 
 // Paths reachable without a session. OAuth metadata/endpoints and /api/mcp (bearer token) do
-// their own auth; the consent page /oauth/authorize stays behind login.
-const PUBLIC = [/^\/login(\/|$)/, /^\/\.well-known\//, /^\/api\/oauth\//, /^\/api\/mcp(\/|$)/, /^\/api\/health$/];
+// their own auth, as does /api/photo-upload (signed link); the consent page /oauth/authorize stays behind login.
+const PUBLIC = [/^\/login(\/|$)/, /^\/\.well-known\//, /^\/api\/oauth\//, /^\/api\/mcp(\/|$)/, /^\/api\/photo-upload\//, /^\/api\/health$/];
 
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
