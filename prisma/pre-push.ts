@@ -82,6 +82,27 @@ async function main() {
       await db.$executeRawUnsafe(`DROP TABLE "Profile"`);
     }
   }
+
+  // Profile.onboardedAt: new users go through /onboarding until it is set. When the column first
+  // appears, people already using the app (a weigh-in or a start weight) count as onboarded, and
+  // anyone with weigh-ins but no Profile row gets one, so nobody existing is sent through the wizard.
+  if ((await hasTable("Profile")) && !(await hasColumn("Profile", "onboardedAt"))) {
+    await db.$executeRawUnsafe(`ALTER TABLE "Profile" ADD COLUMN "onboardedAt" TIMESTAMP(3)`);
+    const hasLogs = await hasTable("BodyLog");
+    const n = await db.$executeRawUnsafe(
+      `UPDATE "Profile" p SET "onboardedAt" = now() WHERE p."startWeightKg" IS NOT NULL` +
+        (hasLogs ? ` OR EXISTS (SELECT 1 FROM "BodyLog" b WHERE b."userId" = p."userId")` : ""),
+    );
+    let created = 0;
+    if (hasLogs) {
+      created = await db.$executeRawUnsafe(`
+        INSERT INTO "Profile" ("userId", "onboardedAt", "updatedAt")
+        SELECT DISTINCT b."userId", now(), now() FROM "BodyLog" b
+        JOIN "User" u ON u.id = b."userId"
+        WHERE NOT EXISTS (SELECT 1 FROM "Profile" p WHERE p."userId" = b."userId")`);
+    }
+    console.log(`pre-push: Profile.onboardedAt added; ${n} existing profile(s) marked onboarded, ${created} created`);
+  }
 }
 
 main()

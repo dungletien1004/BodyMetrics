@@ -44,7 +44,6 @@ export async function saveProfile(form: FormData) {
     birthYear: Math.round(clamp(parseNum(form.get("birthYear")), 1920, new Date().getFullYear() - 10, 1995)),
     heightCm: clamp(parseNum(form.get("heightCm")), 100, 250, 170),
     activityFactor: clamp(parseNum(form.get("activityFactor")), 1.1, 1.6, 1.2),
-    startWeightKg: parseNum(form.get("startWeightKg")),
     goalWeightKg: parseNum(form.get("goalWeightKg")),
     dailyDeficit: Math.round(clamp(parseNum(form.get("dailyDeficit")), 0, 1000, 500)),
     proteinPerKg: clamp(parseNum(form.get("proteinPerKg")), 0.8, 3, 1.8),

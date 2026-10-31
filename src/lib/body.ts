@@ -5,7 +5,8 @@ import { dayRange, formatDayShort, shiftDay, todayKey } from "./dates";
 
 export interface WeightSeries {
   points: { date: string; label: string; weight: number | null; avg: number | null }[];
-  latest: number | null; // latest logged weight
+  latest: number | null; // latest logged weight inside the window
+  latestEver: number | null; // latest logged weight, however old
   latestAvg: number | null; // 7-day average today
   weekChange: number | null; // 7-day average vs a week earlier
   firstWeight: number | null; // first weight ever logged
@@ -17,7 +18,7 @@ export async function getWeightSeries(userId: string, days: number): Promise<Wei
   const from = shiftDay(to, -(days - 1));
   // Load 7 extra days so the average is warm at the start of the window.
   const warmFrom = shiftDay(from, -7);
-  const [logs, first] = await Promise.all([
+  const [logs, first, last] = await Promise.all([
     db.bodyLog.findMany({
       where: { userId, date: { gte: warmFrom, lte: to }, weightKg: { not: null } },
       orderBy: [{ date: "asc" }, { createdAt: "asc" }],
@@ -26,6 +27,11 @@ export async function getWeightSeries(userId: string, days: number): Promise<Wei
     db.bodyLog.findFirst({
       where: { userId, weightKg: { not: null } },
       orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+      select: { weightKg: true },
+    }),
+    db.bodyLog.findFirst({
+      where: { userId, date: { lte: to }, weightKg: { not: null } },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       select: { weightKg: true },
     }),
   ]);
@@ -48,6 +54,7 @@ export async function getWeightSeries(userId: string, days: number): Promise<Wei
   return {
     points,
     latest: logs.at(-1)?.weightKg ?? null,
+    latestEver: last?.weightKg ?? null,
     latestAvg,
     weekChange: latestAvg != null && weekAgoAvg != null ? Math.round((latestAvg - weekAgoAvg) * 10) / 10 : null,
     firstWeight: first?.weightKg ?? null,
