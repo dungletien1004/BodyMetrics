@@ -42,6 +42,9 @@ function revalidateAll() {
   revalidatePath("/", "layout");
 }
 
+// Matches the window the connector's list_new_photos looks back over.
+const PENDING_PHOTO_DAYS = 3;
+
 export type UploadMealPhotoResult = { ok: false; error: string } | { ok: true; photoId: string; photoUrl: string };
 
 /** Store a food photo for the meal. Analysis is done in Claude Web through the MCP connector. */
@@ -67,10 +70,10 @@ export async function uploadMealPhoto(form: FormData): Promise<UploadMealPhotoRe
   return { ok: true, photoId: photo.id, photoUrl: uploadUrl(photo.path) };
 }
 
-/** Food photos uploaded more than a day ago whose meal was never saved. */
+/** Food photos no meal took within PENDING_PHOTO_DAYS (abandoned forms, or left for Claude and never logged). */
 async function cleanupAbandonedPhotos(userId: string) {
   const stale = await db.photo.findMany({
-    where: { userId, kind: "food", mealId: null, bodyLogId: null, takenAt: { lt: new Date(Date.now() - 24 * 3600 * 1000) } },
+    where: { userId, kind: "food", mealId: null, bodyLogId: null, takenAt: { lt: new Date(Date.now() - PENDING_PHOTO_DAYS * 24 * 3600 * 1000) } },
   });
   if (!stale.length) return;
   await db.photo.deleteMany({ where: { id: { in: stale.map((p) => p.id) } } });

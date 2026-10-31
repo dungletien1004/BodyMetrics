@@ -2,6 +2,7 @@ import { format } from "date-fns";
 import { ChevronLeft, ChevronRight, Coffee, Cookie, Moon, Plus, Sun, Utensils, type LucideIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { ClaudePhotos } from "@/components/meals/claude-photos";
 import { DeleteMealButton } from "@/components/meals/delete-meal-button";
 import { RepeatMealButton, RepeatPreviousButton } from "@/components/meals/repeat-meal-button";
 import { MEAL_TYPES } from "@/components/meals/types";
@@ -24,8 +25,9 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
   const today = todayKey();
   const date = isDayKey(dateParam) ? dateParam : today;
 
-  const { userId } = await getViewer();
-  const [summary, meals, previousDay] = await Promise.all([
+  const viewer = await getViewer();
+  const { userId } = viewer;
+  const [summary, meals, previousDay, pendingPhotos] = await Promise.all([
     getDaySummary(userId, date),
     db.meal.findMany({
       where: { userId, date },
@@ -33,6 +35,12 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
       include: { items: true, photos: { orderBy: { takenAt: "asc" }, take: 1 } },
     }),
     getPreviousDayMeals(userId, date),
+    // Photos saved for Claude that no meal has taken yet (see list_new_photos in the connector).
+    db.photo.findMany({
+      where: { userId, kind: "food", mealId: null, bodyLogId: null, takenAt: { gte: new Date(Date.now() - 3 * 24 * 3600 * 1000) } },
+      orderBy: { takenAt: "desc" },
+      take: 10,
+    }),
   ]);
 
   // "Lặp lại bữa … hôm qua" for meal types the previous day had and this day doesn't yet.
@@ -122,6 +130,12 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
         </div>
 
         <div className="min-w-0 space-y-4 lg:order-1">
+          <ClaudePhotos
+            username={viewer.viewingAs?.username ?? viewer.user.username}
+            date={date > today ? today : date}
+            photos={pendingPhotos.map((p) => ({ id: p.id, url: uploadUrl(p.path) }))}
+            readOnly={viewer.readOnly}
+          />
           {repeatable.length > 0 && (
             <div className="space-y-2">
               {repeatable.map((t) => {

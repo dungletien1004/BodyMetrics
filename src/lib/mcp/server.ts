@@ -5,7 +5,7 @@ import { exerciseKcal, type Intensity } from "../calc";
 import { isDayKey, shiftDay, todayKey } from "../dates";
 import { db } from "../db";
 import { getDaySummaries, getDaySummary, getProfile, getWeightOn } from "../summary";
-import { deleteImage } from "../storage";
+import { deleteImage, imageAsJpegBase64 } from "../storage";
 
 // Tools Claude (claude.ai connector) uses to read and write the user's log.
 // Claude looks at the photo in the chat itself and sends the structured result here.
@@ -18,7 +18,9 @@ export const MCP_INSTRUCTIONS = `BodyMetrics là nhật ký giảm cân của ng
 - Ảnh cân hoặc số đo: gọi log_body.
 - Ngày mặc định là hôm nay theo giờ của người dùng; chỉ truyền date (YYYY-MM-DD) khi họ nói ngày khác.
 - Sau khi ghi, tóm tắt ngắn những gì đã lưu và lượng calo còn lại trong ngày (có trong kết quả trả về).
-- Connector không chuyển được file ảnh sang BodyMetrics. Khi bữa ăn được ghi từ một ảnh, gửi kèm link add_photo_url trong kết quả và nói người dùng mở link đó (đăng nhập đúng hồ sơ) để gắn ảnh vào bữa vừa ghi.
+- Ảnh chụp trong BodyMetrics: khi người dùng nói đã chụp/lưu ảnh trong BodyMetrics (hoặc "ảnh mới", "ảnh vừa chụp"), gọi list_new_photos, rồi get_photo để xem từng ảnh, phân tích như trên và gọi log_meal kèm photo_id để ảnh tự gắn vào bữa. Mỗi ảnh chỉ ghi một bữa.
+- Ảnh gửi trong chat Claude: connector không chuyển được file ảnh sang BodyMetrics. Sau khi ghi, gửi link add_photo_url để người dùng tự gắn ảnh, hoặc gợi ý lần sau chụp trong BodyMetrics (nút "Để Claude phân tích") để ảnh tự gắn.
+- Muốn gắn ảnh cho bữa đã ghi: KHÔNG ghi lại bữa. Gọi get_day_summary và gửi add_photo_url của đúng bữa đó.
 - Chỉ xóa (delete_meal / delete_workout / delete_body_log) khi người dùng yêu cầu rõ ràng, ví dụ sửa một bản ghi vừa ghi nhầm. Không tự ý xóa để dọn dẹp hay ghi đè; nếu chưa chắc bản ghi nào, hỏi lại trước.
 - Không đưa lời khuyên y khoa.`;
 
@@ -68,6 +70,13 @@ function appOrigin(ctx: ToolContext): string | null {
   return typeof origin === "string" && /^https?:\/\//.test(origin) ? origin : null;
 }
 
+function mealPhotoUrl(origin: string | null, mealId: string): string | null {
+  return origin ? `${origin}/meals/${mealId}#anh-bua-an` : null;
+}
+
+/** Food photos saved in BodyMetrics for Claude that no meal uses yet (kept 3 days). */
+const NEW_PHOTO_WINDOW_MS = 3 * 24 * 3600 * 1000;
+
 async function actingProfile(ctx: ToolContext, profileUsername: string): Promise<{ userId: string; profileUsername: string }> {
   const auth = authContext(ctx);
   if (!profileUsername) throw new Error("Cần chọn profile_username từ list_profiles trước khi thao tác.");
@@ -112,10 +121,14 @@ function fail(message: string) {
   return { content: [{ type: "text" as const, text: message }], isError: true };
 }
 
-async function dayOverview(userId: string, date: string) {
+async function dayOverview(userId: string, date: string, origin: string | null) {
   const [s, meals, workouts] = await Promise.all([
     getDaySummary(userId, date),
-    db.meal.findMany({ where: { userId, date }, orderBy: { eatenAt: "asc" }, include: { items: true } }),
+    db.meal.findMany({
+      where: { userId, date },
+      orderBy: { eatenAt: "asc" },
+      include: { items: true, _count: { select: { photos: true } } },
+    }),
     db.workout.findMany({ where: { userId, date }, orderBy: { startedAt: "asc" }, include: { entries: { include: { exercise: true } } } }),
   ]);
   return {
@@ -136,6 +149,8 @@ async function dayOverview(userId: string, date: string) {
       time: m.eatenAt.toTimeString().slice(0, 5),
       kcal: Math.round(m.items.reduce((a, i) => a + i.kcal, 0)),
       items: m.items.map((i) => `${i.name}${i.portionG ? ` ${i.portionG}g` : ""} ${Math.round(i.kcal)} kcal`),
+      photos: m._count.photos,
+      add_photo_url: mealPhotoUrl(origin, m.id),
     })),
     workouts: workouts.map((w) => ({
       id: w.id,
@@ -184,7 +199,7 @@ export function registerTools(server: McpServer) {
     },
     async ({ profile_username, date }, ctx) => {
       const profile = await actingProfile(ctx, profile_username);
-      return json({ profile_username: profile.profileUsername, ...(await dayOverview(profile.userId, date ?? todayKey())) });
+      return json({ profile_username: profile.profileUsername, ...(await dayOverview(profile.userId, date ?? todayKey(), appOrigin(ctx))) });
     },
   );
 
@@ -243,9 +258,10 @@ export function registerTools(server: McpServer) {
         date: day,
         time: hhmm,
         note: z.string().max(1000).optional(),
+        photo_id: z.string().optional().describe("photo_id từ list_new_photos khi bữa được ghi từ ảnh đã lưu trong BodyMetrics; ảnh sẽ tự gắn vào bữa"),
       }),
     },
-    async ({ profile_username, meal_type, items, date, time, note }, ctx) => {
+    async ({ profile_username, meal_type, items, date, time, note, photo_id }, ctx) => {
       const profile = await actingProfile(ctx, profile_username);
       const userId = profile.userId;
       const d = date ?? todayKey();
@@ -270,14 +286,68 @@ export function registerTools(server: McpServer) {
           },
         },
       });
+      // A photo saved in BodyMetrics and read with get_photo is attached here; one photo, one meal.
+      const attached = photo_id
+        ? (await db.photo.updateMany({ where: { id: photo_id, userId, kind: "food", mealId: null }, data: { mealId: meal.id, date: d } })).count > 0
+        : false;
       const origin = appOrigin(ctx);
       return json({
         profile_username: profile.profileUsername,
         saved_meal_id: meal.id,
-        // The connector can't carry the photo itself; the user attaches it on this page.
-        add_photo_url: origin ? `${origin}/meals/${meal.id}#anh-bua-an` : null,
-        day: await dayOverview(userId, d),
+        photo_attached: attached,
+        ...(photo_id && !attached ? { photo_note: "photo_id không còn hợp lệ (đã gắn vào bữa khác hoặc đã xóa)." } : {}),
+        // Chat photos can't travel through the connector; the user attaches one on this page.
+        add_photo_url: mealPhotoUrl(origin, meal.id),
+        day: await dayOverview(userId, d, origin),
       });
+    },
+  );
+
+  server.registerTool(
+    "list_new_photos",
+    {
+      title: "Ảnh mới chờ phân tích",
+      description:
+        "Ảnh món ăn người dùng đã chụp/lưu trong BodyMetrics (nút \"Để Claude phân tích\") mà chưa gắn vào bữa nào, mới nhất trước. Dùng get_photo để xem ảnh.",
+      inputSchema: z.object({ profile_username: profileUsernameField }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ profile_username }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      const photos = await db.photo.findMany({
+        where: { userId: profile.userId, kind: "food", mealId: null, takenAt: { gte: new Date(Date.now() - NEW_PHOTO_WINDOW_MS) } },
+        orderBy: { takenAt: "desc" },
+        take: 10,
+      });
+      return json({
+        profile_username: profile.profileUsername,
+        photos: photos.map((p) => ({ photo_id: p.id, date: p.date, taken_at: p.takenAt.toTimeString().slice(0, 5) })),
+      });
+    },
+  );
+
+  server.registerTool(
+    "get_photo",
+    {
+      title: "Xem ảnh món ăn",
+      description: "Trả về ảnh món ăn (từ list_new_photos) để phân tích. Sau đó gọi log_meal với cùng photo_id.",
+      inputSchema: z.object({ profile_username: profileUsernameField, photo_id: z.string() }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ profile_username, photo_id }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      const photo = await db.photo.findFirst({ where: { id: photo_id, userId: profile.userId, kind: "food" } });
+      const data = photo ? await imageAsJpegBase64(photo.path, profile.userId) : null;
+      if (!photo || !data) return fail("Không tìm thấy ảnh này trong hồ sơ.");
+      return {
+        content: [
+          { type: "image" as const, data, mimeType: "image/jpeg" },
+          {
+            type: "text" as const,
+            text: JSON.stringify({ photo_id: photo.id, date: photo.date, taken_at: photo.takenAt.toTimeString().slice(0, 5), already_logged: Boolean(photo.mealId) }),
+          },
+        ],
+      };
     },
   );
 
@@ -378,7 +448,7 @@ export function registerTools(server: McpServer) {
         profile_username: profile.profileUsername,
         saved_workout_id: workout.id,
         exercises: workout.entries.map((e) => ({ name: e.exercise.name, kcal: e.kcal })),
-        day: await dayOverview(userId, d),
+        day: await dayOverview(userId, d, appOrigin(ctx)),
       });
     },
   );
@@ -424,7 +494,7 @@ export function registerTools(server: McpServer) {
       if (!meal) return fail("Không tìm thấy bữa ăn.");
       await db.$transaction([db.photo.deleteMany({ where: { mealId: id } }), db.meal.delete({ where: { id } })]);
       await Promise.all(meal.photos.map((p) => deleteImage(p.path, userId)));
-      return json({ profile_username: profile.profileUsername, deleted_meal_id: id, day: await dayOverview(userId, meal.date) });
+      return json({ profile_username: profile.profileUsername, deleted_meal_id: id, day: await dayOverview(userId, meal.date, appOrigin(ctx)) });
     },
   );
 
@@ -442,7 +512,7 @@ export function registerTools(server: McpServer) {
       const w = await db.workout.findFirst({ where: { id, userId } });
       if (!w) return fail("Không tìm thấy buổi tập.");
       await db.workout.delete({ where: { id } });
-      return json({ profile_username: profile.profileUsername, deleted_workout_id: id, day: await dayOverview(userId, w.date) });
+      return json({ profile_username: profile.profileUsername, deleted_workout_id: id, day: await dayOverview(userId, w.date, appOrigin(ctx)) });
     },
   );
 

@@ -49,6 +49,17 @@ export async function readImage(id: string, userId: string): Promise<{ data: Uin
   return db.imageBlob.findFirst({ where: { id, userId }, select: { data: true, mime: true } });
 }
 
+/** A JPEG copy (longest edge `maxEdge`) as base64, e.g. for handing a photo to Claude. */
+export async function imageAsJpegBase64(id: string, userId: string, maxEdge = 1024): Promise<string | null> {
+  const img = await readImage(id, userId);
+  if (!img) return null;
+  const buf = await sharp(img.data)
+    .resize({ width: maxEdge, height: maxEdge, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+  return buf.toString("base64");
+}
+
 export async function deleteImage(id: string, userId: string): Promise<void> {
   await db.imageBlob.deleteMany({ where: { id, userId } });
 }

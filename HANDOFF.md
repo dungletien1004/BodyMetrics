@@ -20,7 +20,8 @@ Tài liệu bàn giao để một AI/dev khác tiếp tục. Đọc kèm `CLAUDE
 
 ### 2.2 Phân tích ảnh qua Claude Web connector
 - Phân tích trực tiếp trong app đã được gỡ để không cần `ANTHROPIC_API_KEY`.
-- Ảnh bữa ăn có thể lưu cùng nhật ký; ảnh đang chọn trong BodyMetrics không tự gửi sang Claude. Người dùng tải ảnh lên chat Claude, bật connector và nêu đúng `profile_username` để Claude đọc/lưu.
+- Ảnh gửi trong chat Claude không chuyển được sang BodyMetrics. Luồng tự gắn ảnh: chụp ở mục "Gửi ảnh cho Claude" trên `/meals` (ảnh chờ, giữ 3 ngày), rồi nói với Claude "Ghi bữa ăn từ ảnh mới trong BodyMetrics cho hồ sơ <username>". Claude gọi `list_new_photos`, `get_photo` (trả ảnh JPEG ≤1024px) rồi `log_meal` kèm `photo_id`, ảnh tự gắn vào bữa.
+- Mỗi bữa trong kết quả MCP có `add_photo_url` (`/meals/<id>#anh-bua-an`) và số ảnh; trang chi tiết bữa ăn có thẻ "Ảnh bữa ăn" để thêm/xóa ảnh cho bữa đã lưu.
 - Tạo báo cáo tuần mới cũng thực hiện trong chat Claude; các báo cáo cũ đã lưu vẫn hiển thị.
 - Connector cá nhân dùng `/api/mcp`; nhóm dùng chung cần các user tham gia bằng mã trước khi chủ nhóm kết nối. `list_profiles` trả username BodyMetrics, mọi tool đọc/ghi/xóa yêu cầu `profile_username`; membership được kiểm tra lại cho từng thao tác. Mỗi thành viên có thể rời nhóm hoặc được gỡ.
 

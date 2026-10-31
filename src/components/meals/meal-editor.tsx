@@ -364,7 +364,11 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
             <p className="flex gap-2">
               <Sparkles className="mt-0.5 size-3.5 shrink-0 text-accent" />
               <span>
-                Ảnh đang chọn không tự gửi sang Claude. Hãy tải ảnh lên trong chat, yêu cầu phân tích và lưu vào đúng hồ sơ bằng username BodyMetrics chính xác, ví dụ bm_demo_an. Ảnh được đính kèm vào bữa ăn này khi bạn nhấn Lưu bữa ăn.
+                Ảnh ở đây chỉ lưu cùng bữa bạn tự nhập. Muốn Claude tự phân tích, ghi bữa và gắn ảnh? Dùng mục{" "}
+                <Link href={`/meals?date=${initial.date}`} className="font-medium text-accent underline-offset-2 hover:underline">
+                  Gửi ảnh cho Claude
+                </Link>{" "}
+                ở trang Ăn uống.
               </span>
             </p>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
