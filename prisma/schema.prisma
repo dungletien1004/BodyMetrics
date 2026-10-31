@@ -25,6 +25,9 @@ model User {
   passwordHash String // scrypt, see src/lib/auth/password.ts
   // Bumped on password change or deactivation; sessions carrying an older value are rejected.
   sessionVer   Int      @default(1)
+  // Set when an admin creates the account or resets its password: the user must pick their own
+  // password before using the app.
+  mustChangePassword Boolean @default(false)
   createdAt    DateTime @default(now())
 
   profile       Profile?

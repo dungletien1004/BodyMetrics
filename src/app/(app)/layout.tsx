@@ -8,12 +8,13 @@ import { exitViewAs } from "./view-as-actions";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const viewer = await getViewer();
   const isAdmin = viewer.user.role === "admin";
+  const account = { username: viewer.user.username, name: viewer.user.name };
   return (
     <>
       <div className="flex min-h-dvh">
-        <SideNav username={viewer.user.username} isAdmin={isAdmin} />
+        <SideNav account={account} isAdmin={isAdmin} />
         <div className="min-w-0 flex-1">
-          <MobileTopBar isAdmin={isAdmin} />
+          <MobileTopBar account={account} isAdmin={isAdmin} />
           {viewer.viewingAs && (
             <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2 bg-amber-500 px-4 py-2 text-sm text-black md:top-0">
               <span className="flex items-center gap-2">

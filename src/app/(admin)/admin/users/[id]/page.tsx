@@ -7,7 +7,7 @@ import { requireAdmin } from "@/lib/auth";
 import { formatDayShort } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { num } from "@/lib/format";
-import { lastActivityLabel, RoleBadge, StatusBadge, ViewAsButton, WeightChange } from "../../user-bits";
+import { ActivityBadge, lastActivityLabel, MustChangeBadge, RoleBadge, StatusBadge, ViewAsButton, WeightChange } from "../../user-bits";
 import { ActiveToggle, DeleteUserForm, EditUserForm, ResetPasswordForm } from "../forms";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const user = await db.user.findUnique({
     where: { id },
-    select: { id: true, username: true, name: true, role: true, active: true, createdAt: true },
+    select: { id: true, username: true, name: true, role: true, active: true, mustChangePassword: true, createdAt: true },
   });
   if (!user) notFound();
 
@@ -52,6 +52,8 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
             {isSelf && <span>· bạn</span>}
             <RoleBadge role={user.role} />
             <StatusBadge active={user.active} />
+            <ActivityBadge lastActivity={s7.lastActivity} createdAt={user.createdAt} active={user.active} />
+            {user.mustChangePassword && <MustChangeBadge />}
             <span>· tạo {format(user.createdAt, "dd/MM/yyyy")}</span>
           </div>
         </div>
@@ -65,17 +67,23 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
         <Stat label="Lần cân đo" value={num(s7.bodyLogs, 0)} />
         <Stat
           label="Cân nặng mới nhất"
-          value={num(s7.latestWeight)}
+          value={s7.latestWeight != null ? num(s7.latestWeight) : <span className="text-base font-normal text-muted">Chưa có lần cân</span>}
           unit={s7.latestWeight != null ? "kg" : undefined}
           sub={s7.latestWeightDate ? formatDayShort(s7.latestWeightDate) : undefined}
         />
         <Stat
           label="Thay đổi 7 ngày"
-          value={<span className="text-base"><WeightChange value={s7.weightChange} /></span>}
+          value={
+            <span className="text-base">
+              <WeightChange value={s7.weightChange} latestDate={s7.latestWeightDate} range={7} />
+            </span>
+          }
           sub={
-            <>
-              30 ngày: <WeightChange value={s30.weightChange} />
-            </>
+            s7.latestWeightDate ? (
+              <>
+                30 ngày: <WeightChange value={s30.weightChange} latestDate={s30.latestWeightDate} range={30} />
+              </>
+            ) : undefined
           }
         />
       </Card>
@@ -93,7 +101,11 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
 
         <Card>
           <CardTitle>Đặt lại mật khẩu</CardTitle>
-          <p className="mb-3 text-sm text-muted">Người dùng sẽ bị đăng xuất khỏi mọi thiết bị và phải đăng nhập bằng mật khẩu mới.</p>
+          <p className="mb-3 text-sm text-muted">
+            {isSelf
+              ? "Các thiết bị khác của bạn sẽ bị đăng xuất; trình duyệt này vẫn đăng nhập."
+              : "Người dùng bị đăng xuất khỏi mọi thiết bị (kể cả kết nối Claude), đăng nhập bằng mật khẩu mới rồi phải đổi sang mật khẩu của riêng mình."}
+          </p>
           <ResetPasswordForm userId={user.id} username={user.username} />
         </Card>
 

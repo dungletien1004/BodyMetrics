@@ -16,7 +16,8 @@ export const MCP_INSTRUCTIONS = `BodyMetrics là nhật ký giảm cân của ng
 - Ảnh/ghi chú buổi tập (ảnh màn hình đồng hồ, máy chạy, nhật ký gym): gọi list_exercises để tìm đúng tên bài tập, rồi log_workout. Nếu đồng hồ cho số kcal, truyền vào kcal_override.
 - Ảnh cân hoặc số đo: gọi log_body.
 - Ngày mặc định là hôm nay theo giờ của người dùng; chỉ truyền date (YYYY-MM-DD) khi họ nói ngày khác.
-- Sau khi ghi, tóm tắt ngắn những gì đã lưu và lượng calo còn lại trong ngày (có trong kết quả trả về). Nếu ghi nhầm, dùng delete_meal / delete_workout / delete_body_log với id đã trả về.
+- Sau khi ghi, tóm tắt ngắn những gì đã lưu và lượng calo còn lại trong ngày (có trong kết quả trả về).
+- Chỉ xóa (delete_meal / delete_workout / delete_body_log) khi người dùng yêu cầu rõ ràng, ví dụ sửa một bản ghi vừa ghi nhầm. Không tự ý xóa để dọn dẹp hay ghi đè; nếu chưa chắc bản ghi nào, hỏi lại trước.
 - Không đưa lời khuyên y khoa.`;
 
 const day = z
@@ -324,7 +325,8 @@ export function registerTools(server: McpServer) {
     "delete_meal",
     {
       title: "Xóa bữa ăn",
-      description: "Xóa một bữa ăn theo id (dùng khi vừa ghi nhầm).",
+      description:
+        "Xóa vĩnh viễn một bữa ăn của người dùng theo id, kể cả ảnh đính kèm. Chỉ gọi khi người dùng yêu cầu xóa (ví dụ bữa vừa ghi nhầm); không tự ý xóa.",
       inputSchema: z.object({ id: z.string() }),
       annotations: { destructiveHint: true },
     },
@@ -342,7 +344,7 @@ export function registerTools(server: McpServer) {
     "delete_workout",
     {
       title: "Xóa buổi tập",
-      description: "Xóa một buổi tập theo id.",
+      description: "Xóa vĩnh viễn một buổi tập của người dùng theo id. Chỉ gọi khi người dùng yêu cầu xóa; không tự ý xóa.",
       inputSchema: z.object({ id: z.string() }),
       annotations: { destructiveHint: true },
     },
@@ -359,7 +361,8 @@ export function registerTools(server: McpServer) {
     "delete_body_log",
     {
       title: "Xóa lần ghi chỉ số",
-      description: "Xóa một lần ghi cân nặng/số đo theo id.",
+      description:
+        "Xóa vĩnh viễn một lần ghi cân nặng/số đo của người dùng theo id, kể cả ảnh đính kèm. Chỉ gọi khi người dùng yêu cầu xóa; không tự ý xóa.",
       inputSchema: z.object({ id: z.string() }),
       annotations: { destructiveHint: true },
     },

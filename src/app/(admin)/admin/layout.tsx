@@ -5,6 +5,7 @@ import { logout } from "@/app/login/actions";
 import { requireAdmin } from "@/lib/auth";
 import { openMyApp } from "./actions";
 import { AdminNav } from "./admin-nav";
+import { LockedForm } from "./locked-form";
 
 export const metadata: Metadata = { title: "Quản trị · BodyMetrics" };
 
@@ -22,7 +23,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </Link>
           <AdminNav />
           <div className="ml-auto flex items-center gap-1">
-            <form action={openMyApp}>
+            <LockedForm action={openMyApp}>
               <button
                 type="submit"
                 title="Về ứng dụng với dữ liệu của bạn"
@@ -30,9 +31,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               >
                 <LayoutDashboard className="size-4" /> <span className="hidden sm:inline">Ứng dụng của tôi</span>
               </button>
-            </form>
+            </LockedForm>
             <span className="hidden max-w-32 truncate px-2 text-sm text-zinc-400 lg:inline">{me.username}</span>
-            <form action={logout}>
+            <LockedForm action={logout}>
               <button
                 type="submit"
                 aria-label="Đăng xuất"
@@ -41,7 +42,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               >
                 <LogOut className="size-4" />
               </button>
-            </form>
+            </LockedForm>
           </div>
         </div>
       </header>

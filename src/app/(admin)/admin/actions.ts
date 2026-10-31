@@ -10,7 +10,15 @@ import { db } from "@/lib/db";
 import { USERNAME_RE } from "./password";
 import { revokeAllForUser } from "@/lib/oauth/tokens";
 
-export type AdminFormState = { ok?: string; error?: string; password?: string; username?: string; userId?: string } | null;
+export type AdminFormState = {
+  ok?: string;
+  error?: string;
+  field?: "username" | "password"; // which input the error belongs to
+  password?: string;
+  username?: string;
+  userId?: string;
+  mustChange?: boolean; // the user has to replace this password at their next sign-in
+} | null;
 
 function revalidateAdmin() {
   revalidatePath("/admin", "layout");
@@ -49,23 +57,31 @@ export async function createUser(_prev: AdminFormState, form: FormData): Promise
   const password = String(form.get("password") ?? "");
 
   if (!USERNAME_RE.test(username)) {
-    return { error: "Tên đăng nhập gồm 3–32 ký tự: chữ thường, số, dấu chấm, gạch dưới hoặc gạch ngang." };
+    return { error: "Tên đăng nhập gồm 3–32 ký tự: chữ thường, số, dấu chấm, gạch dưới hoặc gạch ngang.", field: "username" };
   }
   const pwError = passwordError(password);
-  if (pwError) return { error: pwError };
+  if (pwError) return { error: pwError, field: "password" };
   if (await db.user.findUnique({ where: { username }, select: { id: true } })) {
-    return { error: `Tên đăng nhập "${username}" đã có người dùng.` };
+    return { error: `Tên đăng nhập "${username}" đã có người dùng.`, field: "username" };
   }
 
   try {
     const user = await db.user.create({
-      data: { username, name, role, passwordHash: await hashPassword(password), profile: { create: { name } } },
+      data: {
+        username,
+        name,
+        role,
+        passwordHash: await hashPassword(password),
+        // The admin knows this password, so the user replaces it at first sign-in.
+        mustChangePassword: true,
+        profile: { create: { name } },
+      },
     });
     revalidateAdmin();
-    return { ok: "Đã tạo tài khoản.", username, password, userId: user.id };
+    return { ok: "Đã tạo tài khoản.", username, password, userId: user.id, mustChange: true };
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return { error: `Tên đăng nhập "${username}" đã có người dùng.` };
+      return { error: `Tên đăng nhập "${username}" đã có người dùng.`, field: "username" };
     }
     throw e;
   }
@@ -91,24 +107,30 @@ export async function updateUser(userId: string, _prev: AdminFormState, form: Fo
   return { ok: "Đã lưu." };
 }
 
-/** Set a new password (typed or generated) and sign the user out everywhere. */
+/**
+ * Set a new password (typed or generated) and sign the user out everywhere. Someone else's account
+ * must then replace it at next sign-in; resetting your own counts as choosing it yourself.
+ */
 export async function resetPassword(userId: string, _prev: AdminFormState, form: FormData): Promise<AdminFormState> {
   const me = await requireAdmin();
   const password = String(form.get("password") ?? "");
   const pwError = passwordError(password);
-  if (pwError) return { error: pwError };
+  if (pwError) return { error: pwError, field: "password" };
 
   const target = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
   if (!target) return { error: "Không tìm thấy tài khoản." };
+  const self = target.id === me.id;
   const updated = await db.user.update({
     where: { id: userId },
-    data: { passwordHash: await hashPassword(password), sessionVer: { increment: 1 } },
+    data: { passwordHash: await hashPassword(password), sessionVer: { increment: 1 }, mustChangePassword: !self },
   });
   await revokeAllForUser(updated.id);
   // Resetting your own password here should not sign you out of this browser.
-  if (updated.id === me.id) await startSession(updated);
+  if (self) await startSession(updated);
   revalidateAdmin();
-  return { ok: "Đã đặt mật khẩu mới. Người dùng đã bị đăng xuất khỏi mọi thiết bị.", password };
+  return self
+    ? { ok: "Đã đổi mật khẩu của bạn. Các thiết bị khác đã bị đăng xuất.", password }
+    : { ok: "Đã đặt mật khẩu mới. Người dùng đã bị đăng xuất khỏi mọi thiết bị.", password, mustChange: true };
 }
 
 /** Lock (also signs the user out) or unlock an account. */

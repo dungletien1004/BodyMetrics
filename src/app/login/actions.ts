@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { endSession, ensureBootstrapUser, safeNext, startSession } from "@/lib/auth";
+import { changePasswordUrl, endSession, ensureBootstrapUser, safeNext, startSession } from "@/lib/auth";
 import { verifyPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
 
@@ -40,7 +40,8 @@ export async function login(_prev: LoginState, form: FormData): Promise<LoginSta
 
   const username = String(form.get("username") ?? "").trim();
   const password = String(form.get("password") ?? "");
-  if (!username || !password) return { error: "Nhập tên đăng nhập và mật khẩu." };
+  if (!username) return { error: "Nhập tên đăng nhập." };
+  if (!password) return { error: "Nhập mật khẩu.", username };
 
   if ((await ensureBootstrapUser()) === "missing") {
     return { error: "Chưa có tài khoản. Đặt AUTH_USERNAME và AUTH_PASSWORD trong biến môi trường, hoặc chạy npm run user:set." };
@@ -58,7 +59,9 @@ export async function login(_prev: LoginState, form: FormData): Promise<LoginSta
 
   failures.delete(ip);
   await startSession(user);
-  redirect(safeNext(form.get("next")));
+  const next = safeNext(form.get("next"));
+  // An admin-set password is replaced first; the change page then continues to `next`.
+  redirect(user.mustChangePassword ? changePasswordUrl(next) : next);
 }
 
 export async function logout() {
