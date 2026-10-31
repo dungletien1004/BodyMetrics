@@ -4,6 +4,7 @@ import { defaultMealType } from "@/components/meals/types";
 import { PageHeader } from "@/components/ui";
 import { hasAiKey } from "@/lib/ai/client";
 import { formatDayLong, isDayKey, todayKey } from "@/lib/dates";
+import { getPreviousDayMeals } from "../previous";
 import { getRecentFoods } from "../recent";
 import { getViewer } from "@/lib/auth";
 
@@ -16,7 +17,7 @@ export default async function NewMealPage({ searchParams }: { searchParams: Prom
   const date = isDayKey(dateParam) ? dateParam : todayKey();
   const now = new Date();
   const { userId } = await getViewer();
-  const recentFoods = await getRecentFoods(userId);
+  const [recentFoods, previousDay] = await Promise.all([getRecentFoods(userId), getPreviousDayMeals(userId, date)]);
 
   return (
     <>
@@ -26,6 +27,7 @@ export default async function NewMealPage({ searchParams }: { searchParams: Prom
         initial={{ date, type: defaultMealType(now), time: format(now, "HH:mm"), note: "", items: [] }}
         recentFoods={recentFoods}
         aiEnabled={hasAiKey()}
+        previousDay={previousDay}
       />
     </>
   );

@@ -1,16 +1,21 @@
 import { format } from "date-fns";
-import { ChevronLeft, ChevronRight, Plus, Sparkles, Utensils } from "lucide-react";
+import { ChevronLeft, ChevronRight, Coffee, Cookie, Moon, Plus, Sun, Utensils, type LucideIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { DeleteMealButton } from "@/components/meals/delete-meal-button";
+import { RepeatMealButton, RepeatPreviousButton } from "@/components/meals/repeat-meal-button";
 import { MEAL_TYPES } from "@/components/meals/types";
 import { Card, CardTitle, EmptyState, LinkButton, PageHeader, Progress, Stat } from "@/components/ui";
-import { formatDayLong, isDayKey, shiftDay, todayKey } from "@/lib/dates";
+import { formatDayLong, formatDayShort, isDayKey, shiftDay, todayKey } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { kcal, num } from "@/lib/format";
 import { uploadUrl } from "@/lib/storage";
 import { getDaySummary } from "@/lib/summary";
 import { getViewer } from "@/lib/auth";
+import { getPreviousDayMeals } from "./previous";
+
+// Placeholder for meals without a photo: an icon for the meal type on a soft tint.
+const TYPE_ICON: Record<string, LucideIcon> = { breakfast: Coffee, lunch: Sun, dinner: Moon, snack: Cookie };
 
 export const dynamic = "force-dynamic";
 
@@ -20,14 +25,19 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
   const date = isDayKey(dateParam) ? dateParam : today;
 
   const { userId } = await getViewer();
-  const [summary, meals] = await Promise.all([
+  const [summary, meals, previousDay] = await Promise.all([
     getDaySummary(userId, date),
     db.meal.findMany({
       where: { userId, date },
       orderBy: { eatenAt: "asc" },
       include: { items: true, photos: { orderBy: { takenAt: "asc" }, take: 1 } },
     }),
+    getPreviousDayMeals(userId, date),
   ]);
+
+  // "Lặp lại bữa … hôm qua" for meal types the previous day had and this day doesn't yet.
+  const prevLabel = date === today ? "hôm qua" : `ngày ${formatDayShort(shiftDay(date, -1))}`;
+  const repeatable = date > today ? [] : MEAL_TYPES.filter((t) => previousDay[t.value] && !meals.some((m) => m.type === t.value));
 
   const remaining = summary.targetKcal - summary.intakeKcal;
   // Suggested split of the remaining energy: ~28% fat, the rest carbs after protein.
@@ -75,7 +85,7 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-4 lg:order-2">
+        <div className="min-w-0 space-y-4 lg:order-2">
           <Card>
             <div className="grid grid-cols-3 gap-3">
               <Stat label="Đã ăn" value={kcal(summary.intakeKcal)} unit="kcal" tone="intake" />
@@ -111,13 +121,30 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
           </Card>
         </div>
 
-        <div className="space-y-4 lg:order-1">
+        <div className="min-w-0 space-y-4 lg:order-1">
+          {repeatable.length > 0 && (
+            <div className="space-y-2">
+              {repeatable.map((t) => {
+                const prev = previousDay[t.value]!;
+                return (
+                  <RepeatPreviousButton
+                    key={t.value}
+                    date={date}
+                    type={t.value}
+                    label={`Lặp lại bữa ${t.label.toLowerCase()} ${prevLabel}`}
+                    detail={prev.items.map((i) => i.name).join(", ")}
+                    kcal={kcal(prev.kcal)}
+                  />
+                );
+              })}
+            </div>
+          )}
           {meals.length === 0 ? (
             <EmptyState title="Chưa có bữa ăn nào">
-              <p>Chụp ảnh bữa ăn để AI ước lượng calo, hoặc nhập tay.</p>
+              <p>Tìm món trong danh sách món Việt (phở, cơm tấm, trà sữa…), chụp ảnh hoặc nhập tay.</p>
               <div className="mt-4 flex justify-center">
                 <LinkButton href={`/meals/new?date=${date}`}>
-                  <Sparkles className="size-4" /> Thêm bữa ăn
+                  <Plus className="size-4" /> Thêm bữa ăn
                 </LinkButton>
               </div>
             </EmptyState>
@@ -135,6 +162,8 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
                     {group.map((m) => {
                       const mealKcal = m.items.reduce((s, i) => s + i.kcal, 0);
                       const photo = m.photos[0];
+                      const single = m.items.length === 1;
+                      const Icon = TYPE_ICON[m.type] ?? Utensils;
                       return (
                         <li key={m.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
                           <Link href={`/meals/${m.id}`} className="flex min-w-0 flex-1 items-start gap-3">
@@ -148,8 +177,8 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
                                 className="size-16 shrink-0 rounded-xl object-cover"
                               />
                             ) : (
-                              <div className="flex size-16 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-muted">
-                                <Utensils className="size-5" />
+                              <div className="flex size-16 shrink-0 items-center justify-center rounded-xl bg-intake/10 text-intake">
+                                <Icon className="size-6" strokeWidth={1.75} />
                               </div>
                             )}
                             <div className="min-w-0 flex-1">
@@ -164,14 +193,18 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
                                       {i.name}
                                       {i.portionG ? <span className="text-muted"> · {num(i.portionG, 0)} g</span> : null}
                                     </span>
-                                    <span className="shrink-0 tabular-nums text-muted">{kcal(i.kcal)}</span>
+                                    {/* A one-item meal already shows its kcal in the header. */}
+                                    {!single && <span className="shrink-0 tabular-nums text-muted">{kcal(i.kcal)}</span>}
                                   </li>
                                 ))}
                               </ul>
                               {m.note && <p className="mt-1 truncate text-xs text-muted">{m.note}</p>}
                             </div>
                           </Link>
-                          <DeleteMealButton id={m.id} compact />
+                          <div className="-mt-1 flex shrink-0 flex-col items-center">
+                            {m.items.length > 0 && <RepeatMealButton mealId={m.id} compact />}
+                            <DeleteMealButton id={m.id} compact />
+                          </div>
                         </li>
                       );
                     })}

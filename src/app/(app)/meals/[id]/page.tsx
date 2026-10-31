@@ -2,6 +2,7 @@ import { format } from "date-fns";
 import { notFound } from "next/navigation";
 import { DeleteMealButton } from "@/components/meals/delete-meal-button";
 import { MealEditor } from "@/components/meals/meal-editor";
+import { RepeatMealButton } from "@/components/meals/repeat-meal-button";
 import { isMealType, mealTypeLabel } from "@/components/meals/types";
 import { PageHeader } from "@/components/ui";
 import { formatDayLong } from "@/lib/dates";
@@ -26,7 +27,12 @@ export default async function MealPage({ params }: { params: Promise<{ id: strin
       <PageHeader
         title={`Bữa ${mealTypeLabel(meal.type).toLowerCase()}`}
         subtitle={`${formatDayLong(meal.date)} · ${format(meal.eatenAt, "HH:mm")}`}
-        action={<DeleteMealButton id={meal.id} redirectTo={`/meals?date=${meal.date}`} />}
+        action={
+          <div className="flex flex-wrap items-start gap-2">
+            {meal.items.length > 0 && <RepeatMealButton mealId={meal.id} />}
+            <DeleteMealButton id={meal.id} redirectTo={`/meals?date=${meal.date}`} />
+          </div>
+        }
       />
       <MealEditor
         mode="edit"

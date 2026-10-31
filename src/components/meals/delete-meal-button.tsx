@@ -1,15 +1,25 @@
 "use client";
 
 import { Loader2, Trash2 } from "lucide-react";
-import { useTransition } from "react";
+import { useRef, useTransition } from "react";
 import { deleteMeal } from "@/app/(app)/meals/actions";
 import { Button, cn } from "@/components/ui";
 
 export function DeleteMealButton({ id, redirectTo, compact }: { id: string; redirectTo?: string; compact?: boolean }) {
   const [pending, start] = useTransition();
+  // A ref, not only `disabled`: a double tap fires twice before React re-renders.
+  const lock = useRef(false);
   const onClick = () => {
-    if (!confirm("Xóa bữa ăn này cùng ảnh của nó?")) return;
-    start(() => deleteMeal(id, redirectTo));
+    if (lock.current || !confirm("Xóa bữa ăn này cùng ảnh của nó?")) return;
+    lock.current = true;
+    start(async () => {
+      try {
+        await deleteMeal(id, redirectTo);
+      } finally {
+        // Without a redirect the row disappears on revalidation; release so a failure can be retried.
+        lock.current = false;
+      }
+    });
   };
 
   if (compact) {

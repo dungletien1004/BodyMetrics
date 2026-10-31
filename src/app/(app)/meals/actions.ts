@@ -1,14 +1,16 @@
 "use server";
 
+import { format } from "date-fns";
+import type { MealItem } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { AnalyzePhotoResult, MealInput } from "@/components/meals/types";
-import { MEAL_TYPES } from "@/components/meals/types";
+import { isMealType, MEAL_TYPES } from "@/components/meals/types";
 import { analyzeFoodPhoto } from "@/lib/ai/food";
 import { hasAiKey } from "@/lib/ai/client";
 import { requireWriter } from "@/lib/auth";
-import { isDayKey, todayKey } from "@/lib/dates";
+import { isDayKey, shiftDay, todayKey } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { deleteImage, saveImage, uploadUrl } from "@/lib/storage";
 
@@ -72,7 +74,7 @@ export async function analyzePhoto(form: FormData): Promise<AnalyzePhotoResult> 
       items: [],
       notes: null,
       aiRaw: null,
-      warning: "Chưa cấu hình ANTHROPIC_API_KEY nên AI không phân tích được. Ảnh đã được lưu - hãy nhập món ăn bằng tay.",
+      warning: "AI trong ứng dụng chưa được bật nên không đọc được ảnh. Ảnh đã được lưu - hãy tìm món ở ô bên dưới.",
     };
   }
 
@@ -189,4 +191,48 @@ export async function deleteMeal(id: string, redirectTo?: string): Promise<void>
   }
   revalidateAll();
   if (redirectTo?.startsWith("/meals")) redirect(redirectTo);
+}
+
+const copyItems = (items: MealItem[]) =>
+  items.map((i) => ({
+    name: i.name,
+    portionG: i.portionG,
+    kcal: i.kcal,
+    proteinG: i.proteinG,
+    carbG: i.carbG,
+    fatG: i.fatG,
+    source: i.source,
+    confidence: i.confidence,
+  }));
+
+/** "Ăn lại": copy a meal's items into a new meal today, at the current time. Photos and notes stay with the original. */
+export async function repeatMeal(id: string): Promise<SaveMealResult> {
+  const userId = await requireWriter();
+  const src = await db.meal.findFirst({ where: { id, userId }, include: { items: true } });
+  if (!src) return { error: "Bữa ăn không còn tồn tại." };
+  if (!src.items.length) return { error: "Bữa ăn này không có món nào." };
+  const date = todayKey();
+  await db.meal.create({ data: { userId, date, type: src.type, eatenAt: new Date(), items: { create: copyItems(src.items) } } });
+  revalidateAll();
+  redirect(`/meals?date=${date}`);
+}
+
+/** Copy the previous day's meals of one type onto `date`, keeping their time of day. */
+export async function repeatPreviousDay(date: string, type: string): Promise<SaveMealResult> {
+  const userId = await requireWriter();
+  if (!isDayKey(date) || !isMealType(type)) return { error: "Dữ liệu chưa hợp lệ." };
+  const src = await db.meal.findMany({
+    where: { userId, date: shiftDay(date, -1), type, items: { some: {} } },
+    include: { items: true },
+    orderBy: { eatenAt: "asc" },
+  });
+  if (!src.length) return { error: "Hôm trước không có bữa này." };
+  await db.$transaction(
+    src.map((m) => {
+      const eatenAt = new Date(`${date}T${format(m.eatenAt, "HH:mm")}:00`);
+      return db.meal.create({ data: { userId, date, type, eatenAt, items: { create: copyItems(m.items) } } });
+    }),
+  );
+  revalidateAll();
+  redirect(`/meals?date=${date}`);
 }

@@ -61,6 +61,14 @@ export interface RecentFood {
   fatG: number;
 }
 
+/** One meal type's items from the previous day, offered as "Lặp lại bữa … hôm qua". */
+export interface PreviousMeal {
+  /** Time of the first meal of that type, HH:mm. */
+  time: string;
+  items: MealItemInput[];
+  kcal: number;
+}
+
 export interface AnalyzedPhoto {
   photoId: string;
   photoUrl: string;
