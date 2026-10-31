@@ -67,7 +67,7 @@ export function RepeatMealButton({ mealId, compact }: { mealId: string; compact?
 }
 
 /** "Lặp lại bữa … hôm qua" on the meal list: copies the previous day's meals of one type onto `date`. */
-export function RepeatPreviousButton({ date, type, label, detail }: { date: string; type: string; label: string; detail: string }) {
+export function RepeatPreviousButton({ date, type, label, detail, kcal }: { date: string; type: string; label: string; detail: string; kcal: string }) {
   const { pending, error, run } = useRepeat({ date, type });
   return (
     <button
@@ -81,6 +81,7 @@ export function RepeatPreviousButton({ date, type, label, detail }: { date: stri
         <span className="block font-medium text-accent">{label}</span>
         <span className={cn("block truncate text-xs", error ? "text-danger" : "text-muted")}>{error ?? detail}</span>
       </span>
+      <span className="shrink-0 text-xs font-medium tabular-nums text-muted">{kcal} kcal</span>
     </button>
   );
 }

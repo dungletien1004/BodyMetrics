@@ -85,7 +85,7 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-4 lg:order-2">
+        <div className="min-w-0 space-y-4 lg:order-2">
           <Card>
             <div className="grid grid-cols-3 gap-3">
               <Stat label="Đã ăn" value={kcal(summary.intakeKcal)} unit="kcal" tone="intake" />
@@ -121,7 +121,7 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
           </Card>
         </div>
 
-        <div className="space-y-4 lg:order-1">
+        <div className="min-w-0 space-y-4 lg:order-1">
           {repeatable.length > 0 && (
             <div className="space-y-2">
               {repeatable.map((t) => {
@@ -132,7 +132,8 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
                     date={date}
                     type={t.value}
                     label={`Lặp lại bữa ${t.label.toLowerCase()} ${prevLabel}`}
-                    detail={`${prev.items.map((i) => i.name).join(", ")} · ${kcal(prev.kcal)} kcal`}
+                    detail={prev.items.map((i) => i.name).join(", ")}
+                    kcal={kcal(prev.kcal)}
                   />
                 );
               })}
@@ -200,7 +201,7 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
                               {m.note && <p className="mt-1 truncate text-xs text-muted">{m.note}</p>}
                             </div>
                           </Link>
-                          <div className="-mt-1 -mr-1 flex shrink-0 flex-col items-center">
+                          <div className="-mt-1 flex shrink-0 flex-col items-center">
                             {m.items.length > 0 && <RepeatMealButton mealId={m.id} compact />}
                             <DeleteMealButton id={m.id} compact />
                           </div>

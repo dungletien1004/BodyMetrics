@@ -102,7 +102,8 @@ function scaleTo(r: Row, grams: number, typed = str(grams)): Row {
   return next;
 }
 
-const portionText = (p: FoodPortion) => (p.label === "100 g" ? p.label : `${p.label} · ${num(p.g, 0)} g`);
+// "1 tô · 550 g"; labels that already state the amount ("100 g", "1 lon 330 ml") stay as they are.
+const portionText = (p: FoodPortion) => (/\d\s*(g|ml|L)\b/.test(p.label) ? p.label : `${p.label} · ${num(p.g, 0)} g`);
 
 type SearchResult = { kind: "food"; food: Food; score: number } | { kind: "recent"; food: RecentFood; score: number };
 
@@ -451,7 +452,8 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
           {/* Not <Input>: cn() has no tailwind-merge, so its px-3 would fight the icon padding. */}
           <input
             ref={searchRef}
-            type="search"
+            type="text"
+            inputMode="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
