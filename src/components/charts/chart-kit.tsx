@@ -2,7 +2,7 @@
 
 // Shared bits for the Recharts charts: theme colors (CSS vars, so light/dark follow the
 // app theme), axis styling, tooltip box, legend and a small segmented toggle.
-import type { ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { cn } from "@/components/ui";
 
 export const C = {
@@ -89,7 +89,7 @@ export function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           aria-pressed={value === o.value}
           className={cn(
-            "rounded-lg px-2.5 py-1 transition",
+            "rounded-lg px-2 py-1 transition sm:px-2.5",
             value === o.value ? "bg-surface font-medium text-foreground shadow-sm" : "text-muted hover:text-foreground",
           )}
         >
@@ -99,3 +99,43 @@ export function Segmented<T extends string>({
     </div>
   );
 }
+
+export type Granularity = "day" | "week";
+
+const SMALL_SCREEN = "(max-width: 639px)";
+const subscribeSmall = (cb: () => void) => {
+  const m = window.matchMedia(SMALL_SCREEN);
+  m.addEventListener("change", cb);
+  return () => m.removeEventListener("change", cb);
+};
+
+/**
+ * Day or week bars. Weekly by default on phones and for ranges over 4 weeks, where 56-84
+ * daily bars no longer fit; the user's pick wins once they touch the toggle.
+ */
+export function useGranularity(rangeWeeks: number): [Granularity, (g: Granularity) => void] {
+  const small = useSyncExternalStore(subscribeSmall, () => window.matchMedia(SMALL_SCREEN).matches, () => false);
+  const [choice, setChoice] = useState<Granularity | null>(null);
+  return [choice ?? (rangeWeeks > 4 || small ? "week" : "day"), setChoice];
+}
+
+export function GranularityToggle({ value, onChange }: { value: Granularity; onChange: (g: Granularity) => void }) {
+  return (
+    <Segmented
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: "day", label: "Ngày" },
+        { value: "week", label: "Tuần" },
+      ]}
+    />
+  );
+}
+
+/** Daily x-axis ticks on Mondays only: one label per week instead of one per bar. */
+export function mondayTicks(days: { date: string; label: string }[]): string[] {
+  return days.filter((d) => new Date(`${d.date}T00:00:00`).getDay() === 1).map((d) => d.label);
+}
+
+/** Bar sizing: thin bars for days, wide ones for the few weekly bars. */
+export const barSize = (g: Granularity) => (g === "day" ? 10 : 28);

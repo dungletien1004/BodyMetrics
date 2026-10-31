@@ -15,6 +15,10 @@ export function parseWeeks(v: string | string[] | undefined): RangeWeeks {
 export const isLogged = (d: Pick<DaySummary, "mealsLogged">) => d.mealsLogged > 0;
 
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const roundAvg = (xs: number[]) => {
+  const v = avg(xs);
+  return v == null ? null : Math.round(v);
+};
 
 export interface ChartDay {
   date: string;
@@ -31,6 +35,23 @@ export interface ChartDay {
   carbG: number;
   fatG: number;
   proteinTargetG: number;
+}
+
+/** One calendar week for the charts: averages per logged complete day (today excluded). */
+export interface ChartWeek {
+  date: string; // Monday
+  label: string; // dd/MM of the Monday
+  longLabel: string; // "Tuần 27/10–02/11"
+  days: number; // complete days so far (0..7)
+  loggedDays: number;
+  intake: number | null;
+  burn: number | null;
+  target: number | null;
+  balance: number | null;
+  proteinG: number | null;
+  carbG: number | null;
+  fatG: number | null;
+  proteinTargetG: number | null;
 }
 
 export interface WeekRow {
@@ -57,6 +78,7 @@ export interface Analytics {
   to: string;
   goalWeightKg: number | null;
   days: ChartDay[];
+  weekPoints: ChartWeek[]; // oldest first
   weekRows: WeekRow[];
   loggedDays: number; // complete days (before today) with meals logged
   avgBalance: number | null;
@@ -118,6 +140,7 @@ export async function getAnalytics(userId: string, weeks: RangeWeeks): Promise<A
   // Weekly rows, newest first. MA change compares the last MA value of each week.
   const maByDate = new Map(all.map((d, i) => [d.date, ma[i]]));
   const weekRows: WeekRow[] = [];
+  const weekPoints: ChartWeek[] = [];
   // Averages skip today: it is still being logged and would drag the numbers down.
   for (let ws = from; ws <= today; ws = shiftDay(ws, 7)) {
     const we = shiftDay(ws, 6);
@@ -125,6 +148,21 @@ export async function getAnalytics(userId: string, weeks: RangeWeeks): Promise<A
     const logged = week.filter(isLogged);
     const endMa = maByDate.get(we > today ? today : we) ?? null;
     const prevMa = maByDate.get(shiftDay(ws, -1)) ?? null;
+    weekPoints.push({
+      date: ws,
+      label: formatDayShort(ws),
+      longLabel: `Tuần ${formatDayShort(ws)}–${formatDayShort(we)}`,
+      days: week.length,
+      loggedDays: logged.length,
+      intake: roundAvg(logged.map((d) => d.intakeKcal)),
+      burn: roundAvg(logged.map((d) => d.totalBurn)),
+      target: roundAvg(logged.map((d) => d.targetKcal)),
+      balance: roundAvg(logged.map((d) => d.balance)),
+      proteinG: roundAvg(logged.map((d) => d.proteinG)),
+      carbG: roundAvg(logged.map((d) => d.carbG)),
+      fatG: roundAvg(logged.map((d) => d.fatG)),
+      proteinTargetG: roundAvg(logged.map((d) => d.proteinTargetG)),
+    });
     weekRows.push({
       weekStart: ws,
       label: `${formatDayShort(ws)}–${formatDayShort(we)}`,
@@ -176,6 +214,7 @@ export async function getAnalytics(userId: string, weeks: RangeWeeks): Promise<A
     to: today,
     goalWeightKg: goal,
     days,
+    weekPoints,
     weekRows,
     loggedDays: loggedInRange.length,
     avgBalance: avg(loggedInRange.map((d) => d.balance)),

@@ -435,7 +435,7 @@ function EntryCard({
       </div>
 
       {strength && (
-        <div>
+        <div className="sm:max-w-lg">
           <div className="grid grid-cols-[1.25rem_1fr_1fr_2rem] gap-1.5 pb-1 text-xs text-muted">
             <span />
             <span className="text-center">Số lần</span>
