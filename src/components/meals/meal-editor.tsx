@@ -396,7 +396,7 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
           <p className="mb-3 text-sm text-muted">
             {aiEnabled
               ? "Chụp hoặc chọn ảnh bữa ăn, AI sẽ ước lượng món, khẩu phần và calo. Có thể bỏ qua và tìm món bên dưới."
-              : "Ảnh được lưu cùng bữa ăn để xem lại sau."}
+              : "Bạn vẫn có thể chụp hoặc chọn ảnh để lưu cùng bữa ăn."}
           </p>
         )}
 
@@ -416,7 +416,7 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
             </Field>
             <Button type="button" onClick={runAnalysis} disabled={busy} className="w-full sm:w-auto">
               {analyzing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              {photo ? "Phân tích lại" : "Phân tích"}
+              {photo ? "Phân tích lại bằng AI" : "Phân tích bằng AI"}
             </Button>
           </div>
         )}
@@ -424,11 +424,10 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
           <p className="mt-3 flex gap-2 rounded-xl bg-surface-2 p-3 text-xs text-muted">
             <Sparkles className="mt-0.5 size-3.5 shrink-0 text-accent" />
             <span>
-              Muốn ghi bữa ăn bằng ảnh? Gửi ảnh cho Claude sau khi{" "}
+              Chưa bật phân tích ảnh trong ứng dụng. Muốn Claude đọc ảnh và ghi bữa ăn, mở cuộc trò chuyện Claude, bật connector BodyMetrics rồi gửi ảnh. Xem cách kết nối tại{" "}
               <Link href="/profile#ket-noi-claude" className="font-medium text-accent underline-offset-2 hover:underline">
-                kết nối Claude
-              </Link>{" "}
-              - Claude ước lượng món, calo và ghi vào đây giúp bạn.
+                Hồ sơ
+              </Link>.
             </span>
           </p>
         )}
@@ -445,7 +444,7 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
 
   return (
     <div className="space-y-4">
-      {aiEnabled && photoCard}
+      {photoCard}
 
       {warning && (
         <div className="flex gap-2 rounded-xl border border-intake/40 bg-intake/10 p-3 text-sm">
@@ -677,8 +676,6 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
         </div>
         {rows.length > 0 && <p className="mt-2 text-xs text-muted">Đổi khẩu phần hoặc số gram sẽ tự tính lại calo và chất theo tỉ lệ.</p>}
       </Card>
-
-      {!aiEnabled && photoCard}
 
       <Card className="space-y-4">
         <div>
