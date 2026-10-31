@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { compareExercises } from "@/lib/workouts";
+import { compareExercises, isIntensity, type ExerciseHabit } from "@/lib/workouts";
 
 // Every query is scoped to one user's workouts. The exercise library is the shared rows
 // (userId = null) plus that user's own custom exercises.
@@ -43,6 +43,42 @@ export async function getExerciseOptions(userId: string) {
     select: { id: true, name: true, category: true, met: true, muscleGroup: true },
   });
   return list.sort(compareExercises);
+}
+
+/**
+ * The user's exercises by how often they appear in their last 300 entries (ties: most recent),
+ * each with the minutes, intensity and sets of its latest entry so the builder can prefill them.
+ */
+export async function getExerciseHabits(userId: string): Promise<ExerciseHabit[]> {
+  const entries = await db.workoutEntry.findMany({
+    where: { workout: { userId } },
+    orderBy: [{ workout: { date: "desc" } }, { workout: { startedAt: "desc" } }, { order: "asc" }],
+    take: 300,
+    select: {
+      exerciseId: true,
+      durationMin: true,
+      intensity: true,
+      distanceKm: true,
+      workout: { select: { date: true } },
+      sets: { orderBy: { setNo: "asc" }, select: { reps: true, weightKg: true } },
+    },
+  });
+  const byId = new Map<string, ExerciseHabit>();
+  for (const e of entries) {
+    const h = byId.get(e.exerciseId);
+    if (h) h.uses++;
+    else
+      byId.set(e.exerciseId, {
+        exerciseId: e.exerciseId,
+        uses: 1,
+        lastDate: e.workout.date,
+        durationMin: e.durationMin,
+        intensity: isIntensity(e.intensity) ? e.intensity : "moderate",
+        distanceKm: e.distanceKm,
+        sets: e.sets,
+      });
+  }
+  return [...byId.values()].sort((a, b) => b.uses - a.uses || b.lastDate.localeCompare(a.lastDate));
 }
 
 /** Every logged entry of one exercise by this user, oldest first, with its workout date. */

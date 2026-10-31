@@ -3,7 +3,7 @@
 import { CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { ChartDay } from "@/lib/analytics";
 import { num } from "@/lib/format";
-import { axisProps, C, ChartBox, gridProps, Legend, TooltipBox, xAxisProps } from "./chart-kit";
+import { axisProps, C, ChartBox, gridProps, Legend, mondayTicks, TooltipBox, xAxisProps } from "./chart-kit";
 
 export function WeightChart({ days, goalKg }: { days: ChartDay[]; goalKg: number | null }) {
   const values = days.flatMap((d) => [d.weight, d.weightMa]).filter((v): v is number => v != null);
@@ -27,7 +27,7 @@ export function WeightChart({ days, goalKg }: { days: ChartDay[]; goalKg: number
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={days} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
             <CartesianGrid {...gridProps} />
-            <XAxis {...xAxisProps} />
+            <XAxis {...xAxisProps} ticks={mondayTicks(days)} />
             <YAxis {...axisProps} domain={domain} width={40} tickFormatter={(v: number) => num(v, 0)} allowDecimals={false} />
             {showGoal && (
               <ReferenceLine

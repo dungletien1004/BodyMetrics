@@ -127,7 +127,7 @@ function ReportBody({ report }: { report: WeeklyReportContent }) {
         </h3>
         <div className="grid grid-cols-3 gap-2">
           <TargetTile label="Calo / ngày" value={kcal(t.kcal)} unit="kcal" />
-          <TargetTile label="Protein / ngày" value={kcal(t.proteinG)} unit="g" />
+          <TargetTile label="Đạm / ngày" value={kcal(t.proteinG)} unit="g" />
           <TargetTile label="Buổi tập" value={String(t.workouts)} unit="buổi" />
         </div>
       </section>

@@ -29,7 +29,17 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     <>
       <PageHeader
         title="Phân tích"
-        subtitle={`${formatDayShort(a.from)} – ${formatDayShort(a.to)} · ${a.loggedDays}/${a.days.length - 1} ngày trọn vẹn có ghi bữa ăn`}
+        subtitle={
+          <>
+            <span className="whitespace-nowrap">
+              {formatDayShort(a.from)} – {formatDayShort(a.to)}
+            </span>
+            {" · "}
+            <span className="whitespace-nowrap" title="Không tính hôm nay vì ngày chưa kết thúc">
+              ghi bữa ăn {a.loggedDays}/{a.days.length - 1} ngày
+            </span>
+          </>
+        }
         action={<RangeSelector weeks={weeks} />}
       />
 
@@ -61,7 +71,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           <Card>
             <CardTitle>Năng lượng</CardTitle>
             {hasMeals ? (
-              <EnergyChart days={a.days} plannedDeficit={profile.dailyDeficit} />
+              <EnergyChart days={a.days} weeks={a.weekPoints} rangeWeeks={weeks} plannedDeficit={profile.dailyDeficit} />
             ) : (
               <EmptyState title="Chưa ghi bữa ăn nào">
                 <Link href="/meals/new" className="text-accent underline">Ghi bữa ăn</Link> để so sánh calo nạp với tiêu hao.
@@ -71,8 +81,8 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
           <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
             <Card>
-              <CardTitle>Macro mỗi ngày</CardTitle>
-              {hasMeals ? <MacroChart days={a.days} /> : <EmptyState title="Chưa có dữ liệu macro" />}
+              <CardTitle>Macro</CardTitle>
+              {hasMeals ? <MacroChart days={a.days} weeks={a.weekPoints} rangeWeeks={weeks} /> : <EmptyState title="Chưa có dữ liệu macro" />}
             </Card>
             <ProteinCard a={a} />
           </div>
@@ -143,7 +153,7 @@ function HeadlineStats({ a }: { a: Analytics }) {
       </StatCard>
       <StatCard icon={<Target className="size-4" />}>
         <Stat
-          label="Đạt protein"
+          label="Đạt mục tiêu đạm"
           value={a.loggedDays ? Math.round((a.proteinHitDays / a.loggedDays) * 100) : "–"}
           unit="%"
           sub={`${a.proteinHitDays}/${a.loggedDays} ngày có ghi`}
@@ -177,15 +187,15 @@ function ProteinCard({ a }: { a: Analytics }) {
   const share = (k: number) => (totalKcal ? Math.round((k / totalKcal) * 100) : 0);
   return (
     <Card className="space-y-4">
-      <CardTitle>Protein & tỉ lệ macro</CardTitle>
+      <CardTitle>Đạm & tỉ lệ macro</CardTitle>
       <div>
         <div className="mb-1.5 flex items-baseline justify-between text-sm">
-          <span>Ngày đạt mục tiêu protein</span>
+          <span>Ngày đạt mục tiêu đạm</span>
           <span className="font-semibold tabular-nums">{pct}%</span>
         </div>
         <Progress value={a.proteinHitDays} max={a.loggedDays} color="bg-protein" />
         <p className="mt-1.5 text-xs text-muted">
-          {a.proteinHitDays}/{a.loggedDays} ngày có ghi đạt ≥ {target} g. Protein đủ giúp giữ cơ khi giảm cân.
+          {a.proteinHitDays}/{a.loggedDays} ngày có ghi đạt ≥ {target} g. Ăn đủ đạm giúp giữ cơ khi giảm cân.
         </p>
       </div>
       {m && (
@@ -198,9 +208,9 @@ function ProteinCard({ a }: { a: Analytics }) {
           </div>
           <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
             {[
-              { label: "Protein", g: m.proteinG, k: m.proteinG * 4, cls: "bg-protein" },
-              { label: "Carb", g: m.carbG, k: m.carbG * 4, cls: "bg-carb" },
-              { label: "Chất béo", g: m.fatG, k: m.fatG * 9, cls: "bg-fat" },
+              { label: "Đạm", g: m.proteinG, k: m.proteinG * 4, cls: "bg-protein" },
+              { label: "Tinh bột", g: m.carbG, k: m.carbG * 4, cls: "bg-carb" },
+              { label: "Béo", g: m.fatG, k: m.fatG * 9, cls: "bg-fat" },
             ].map((x) => (
               <div key={x.label}>
                 <dt className="flex items-center gap-1.5 text-xs text-muted">
@@ -303,15 +313,15 @@ function WeeklyTable({ a }: { a: Analytics }) {
       <div className="px-4 sm:px-5">
         <CardTitle>Tổng kết theo tuần</CardTitle>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overscroll-x-contain">
         <table className="w-full min-w-[560px] text-sm tabular-nums">
           <thead className="text-xs text-muted">
-            <tr className="border-b border-border text-right">
-              <th className="py-2 pr-2 pl-4 text-left font-medium sm:pl-5">Tuần</th>
+            <tr className="border-b border-border text-right whitespace-nowrap">
+              <th className="sticky left-0 z-[1] bg-surface py-2 pr-2 pl-4 text-left font-medium sm:pl-5">Tuần</th>
               <th className="px-2 py-2 font-medium">Nạp TB</th>
               <th className="px-2 py-2 font-medium">Tiêu hao TB</th>
               <th className="px-2 py-2 font-medium">Cân bằng TB</th>
-              <th className="px-2 py-2 font-medium">Cân (TB 7 ngày)</th>
+              <th className="px-2 py-2 font-medium" title="Theo cân nặng trung bình 7 ngày">Thay đổi cân</th>
               <th className="px-2 py-2 font-medium">Buổi tập</th>
               <th className="py-2 pr-4 pl-2 font-medium sm:pr-5">Ngày ghi</th>
             </tr>
@@ -319,9 +329,9 @@ function WeeklyTable({ a }: { a: Analytics }) {
           <tbody>
             {a.weekRows.map((w) => (
               <tr key={w.weekStart} className="border-b border-border text-right last:border-0">
-                <td className="py-2 pr-2 pl-4 text-left whitespace-nowrap sm:pl-5">
+                <td className="sticky left-0 z-[1] bg-surface py-2 pr-2 pl-4 text-left whitespace-nowrap sm:pl-5">
                   {w.label}
-                  {w.days < 7 && <span className="ml-1 text-xs text-muted">(đang diễn ra)</span>}
+                  {w.days < 7 && <span className="block text-xs text-muted">đang diễn ra</span>}
                 </td>
                 <td className="px-2 py-2">{w.avgIntake != null ? kcal(w.avgIntake) : "–"}</td>
                 <td className="px-2 py-2">{w.avgBurn != null ? kcal(w.avgBurn) : "–"}</td>

@@ -87,6 +87,24 @@ export function setsSummary(sets: SetLike[]): string {
   return done.map(one).join(" · ") + (done.some((s) => s.weightKg) ? " kg" : "");
 }
 
+/** How often a user logs an exercise and what they did last time, for the builder's picker. */
+export interface ExerciseHabit {
+  exerciseId: string;
+  uses: number; // among the user's recent entries
+  lastDate: string;
+  durationMin: number;
+  intensity: Intensity;
+  distanceKm: number | null;
+  sets: SetLike[];
+}
+
+/** Stepper arithmetic on a typed field: "" counts as 0, never below 0, rounded to 2 decimals. */
+export function stepValue(v: string, delta: number): string {
+  const n = Number(v.replace(",", "."));
+  const next = Math.max(0, (Number.isFinite(n) ? n : 0) + delta);
+  return String(Math.round(next * 100) / 100);
+}
+
 /** Local "HH:mm" of a timestamp. */
 export function timeOfDay(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

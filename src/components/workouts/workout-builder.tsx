@@ -1,11 +1,11 @@
 "use client";
 
-import { Copy, Plus, Search, Trash2, X } from "lucide-react";
-import { useMemo, useState, useTransition } from "react";
+import { Check, ChevronDown, Copy, Minus, Plus, Search, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { saveWorkout, weightForDay } from "@/app/(app)/workouts/actions";
-import { Badge, Button, Card, CardTitle, Field, Input, Textarea, cn } from "@/components/ui";
+import { Badge, Button, Card, CardTitle, Field, cn } from "@/components/ui";
 import { exerciseKcal, INTENSITY_LABEL, type Intensity } from "@/lib/calc";
-import { isDayKey } from "@/lib/dates";
+import { formatDayLong, formatDayShort, isDayKey } from "@/lib/dates";
 import { kcal, num, parseNum } from "@/lib/format";
 import {
   CATEGORIES,
@@ -14,8 +14,11 @@ import {
   INTENSITIES,
   MINUTES_PER_SET,
   categoryLabel,
+  setsSummary,
   setsVolume,
+  stepValue,
   type Category,
+  type ExerciseHabit,
   type WorkoutPayload,
 } from "@/lib/workouts";
 
@@ -41,26 +44,40 @@ interface EntryRow {
   intensity: Intensity;
   distance: string;
   sets: SetRow[];
+  prefilledFrom?: string; // day of the previous entry the sets were copied from
 }
 
 let seq = 0;
 const uid = () => `r${++seq}`;
 const str = (n: number | null | undefined) => (n == null ? "" : String(n));
 
+const KG_STEP = 2.5;
+// Keeps a focused field clear of the sticky save bar (and the mobile nav under it).
+const CLEAR_OF_BAR = "scroll-mb-44 md:scroll-mb-28";
+// Like ui.tsx fields but 16px on phones, so iOS does not zoom in on focus.
+const FIELD = cn(
+  "h-11 w-full rounded-xl border border-border bg-surface px-3 text-base outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 sm:text-sm",
+  CLEAR_OF_BAR,
+);
+
 function newSet(reps = "", kg = ""): SetRow {
   return { key: uid(), reps, kg };
 }
 
-function newEntry(ex: ExerciseOption): EntryRow {
+/** A new entry, prefilled from the last time this user did the exercise. */
+function newEntry(ex: ExerciseOption, last?: ExerciseHabit): EntryRow {
   const strength = ex.category === "strength";
+  const lastSets = last?.sets.filter((s) => s.reps != null || s.weightKg != null) ?? [];
+  const sets = !strength ? [] : lastSets.length ? lastSets.map((s) => newSet(str(s.reps), str(s.weightKg))) : [newSet(), newSet(), newSet()];
   return {
     key: uid(),
     exerciseId: ex.id,
-    minutes: String(strength ? 3 * MINUTES_PER_SET : DEFAULT_CARDIO_MINUTES),
+    minutes: String(strength ? sets.length * MINUTES_PER_SET : (last?.durationMin ?? DEFAULT_CARDIO_MINUTES)),
     minutesAuto: strength,
-    intensity: "moderate",
+    intensity: last?.intensity ?? "moderate",
     distance: "",
-    sets: strength ? [newSet(), newSet(), newSet()] : [],
+    sets,
+    prefilledFrom: last && (strength ? lastSets.length > 0 : true) ? last.lastDate : undefined,
   };
 }
 
@@ -78,28 +95,46 @@ function rowsFromPayload(p: WorkoutPayload): EntryRow[] {
 
 const minutesOf = (e: EntryRow) => Math.max(0, parseNum(e.minutes) ?? 0);
 
+/** Server-action redirects surface as an error with a NEXT_REDIRECT digest; let them through. */
+const isRedirect = (err: unknown) =>
+  typeof err === "object" && err != null && "digest" in err && String((err as { digest: unknown }).digest).startsWith("NEXT_REDIRECT");
+
 export function WorkoutBuilder({
   exercises,
+  habits,
   initial,
   initialWeightKg,
   workoutId = null,
 }: {
   exercises: ExerciseOption[];
+  habits: ExerciseHabit[];
   initial: WorkoutPayload;
   initialWeightKg: number;
   workoutId?: string | null;
 }) {
   const byId = useMemo(() => new Map(exercises.map((e) => [e.id, e])), [exercises]);
+  const habitById = useMemo(() => new Map(habits.map((h) => [h.exerciseId, h])), [habits]);
   const [date, setDate] = useState(initial.date);
   const [startTime, setStartTime] = useState(initial.startTime);
   const [duration, setDuration] = useState(str(initial.durationMin));
   const [override, setOverride] = useState(str(initial.kcalOverride));
   const [note, setNote] = useState(initial.note);
+  const [optionsOpen, setOptionsOpen] = useState(initial.durationMin != null || initial.kcalOverride != null || initial.note.trim() !== "");
   const [entries, setEntries] = useState<EntryRow[]>(() => rowsFromPayload(initial));
   const [weight, setWeight] = useState(initialWeightKg);
   const [pickerOpen, setPickerOpen] = useState(initial.entries.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
+  // A ref, not state: two taps in the same frame both see busy=false in a state value.
+  const lock = useRef(false);
+  const [locked, setLocked] = useState(false);
+  const scrollTo = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!scrollTo.current) return;
+    document.getElementById(`entry-${scrollTo.current}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollTo.current = null;
+  }, [entries]);
 
   const entryKcal = (e: EntryRow) => {
     const ex = byId.get(e.exerciseId);
@@ -112,6 +147,7 @@ export function WorkoutBuilder({
     (a, e) => a + setsVolume(e.sets.map((s) => ({ reps: parseNum(s.reps), weightKg: parseNum(s.kg) }))),
     0,
   );
+  const busy = saving || locked;
 
   function update(key: string, fn: (e: EntryRow) => EntryRow) {
     setEntries((list) => list.map((e) => (e.key === key ? fn(e) : e)));
@@ -124,14 +160,27 @@ export function WorkoutBuilder({
     });
   }
 
+  function addExercise(ex: ExerciseOption) {
+    const entry = newEntry(ex, habitById.get(ex.id));
+    scrollTo.current = entry.key;
+    setEntries((list) => [...list, entry]);
+    setPickerOpen(false);
+    setError(null);
+  }
+
   function changeDate(v: string) {
     setDate(v);
     if (isDayKey(v)) weightForDay(v).then((w) => w != null && setWeight(w));
   }
 
   function submit() {
+    if (lock.current) return;
     setError(null);
     if (!entries.length) return setError("Thêm ít nhất một bài tập.");
+    if (!isDayKey(date) || !/^\d{2}:\d{2}$/.test(startTime)) {
+      setOptionsOpen(true);
+      return setError("Kiểm tra lại ngày và giờ bắt đầu trong Tùy chọn.");
+    }
     const payload: WorkoutPayload = {
       date,
       startTime,
@@ -146,9 +195,25 @@ export function WorkoutBuilder({
         sets: e.sets.map((s) => ({ reps: parseNum(s.reps), weightKg: parseNum(s.kg) })),
       })),
     };
+    lock.current = true;
+    setLocked(true);
+    const unlock = () => {
+      lock.current = false;
+      setLocked(false);
+    };
+    // On success the action redirects to the workout, so the lock stays on until the page changes.
     startSaving(async () => {
-      const res = await saveWorkout(workoutId, payload);
-      if (res?.error) setError(res.error);
+      try {
+        const res = await saveWorkout(workoutId, payload);
+        if (res?.error) {
+          setError(res.error);
+          unlock();
+        }
+      } catch (err) {
+        if (isRedirect(err)) throw err;
+        setError("Không lưu được - kiểm tra kết nối rồi thử lại.");
+        unlock();
+      }
     });
   }
 
@@ -159,32 +224,11 @@ export function WorkoutBuilder({
         ev.preventDefault();
         submit();
       }}
+      // Enter / "Go" on a phone keyboard must not save half-entered sets.
+      onKeyDown={(ev) => {
+        if (ev.key === "Enter" && ev.target instanceof HTMLInputElement) ev.preventDefault();
+      }}
     >
-      <Card>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Field label="Ngày">
-            <Input type="date" required value={date} onChange={(e) => changeDate(e.target.value)} />
-          </Field>
-          <Field label="Giờ bắt đầu">
-            <Input type="time" required value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-          </Field>
-          <Field label="Tổng thời gian (phút)" hint="Để trống = tổng phút tập" className="col-span-2 sm:col-span-1">
-            <Input
-              inputMode="numeric"
-              value={duration}
-              placeholder={String(Math.round(totalMinutes))}
-              onChange={(e) => setDuration(e.target.value)}
-            />
-          </Field>
-          <Field label="Calo từ đồng hồ thông minh" hint="Tuỳ chọn - thay cho ước tính MET" className="col-span-2 sm:col-span-1">
-            <Input inputMode="numeric" value={override} placeholder="kcal" onChange={(e) => setOverride(e.target.value)} />
-          </Field>
-        </div>
-        <Field label="Ghi chú" className="mt-3">
-          <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Cảm giác, giấc ngủ, chấn thương…" />
-        </Field>
-      </Card>
-
       {entries.map((e, i) => {
         const ex = byId.get(e.exerciseId);
         if (!ex) return null;
@@ -194,6 +238,7 @@ export function WorkoutBuilder({
             index={i}
             entry={e}
             exercise={ex}
+            last={habitById.get(ex.id)}
             kcalValue={entryKcal(e)}
             onChange={(fn) => update(e.key, fn)}
             onSets={(fn) => updateSets(e.key, fn)}
@@ -205,37 +250,142 @@ export function WorkoutBuilder({
       {pickerOpen ? (
         <ExercisePicker
           exercises={exercises}
-          onPick={(ex) => {
-            setEntries((list) => [...list, newEntry(ex)]);
-            setPickerOpen(false);
-          }}
+          habits={habits}
+          habitById={habitById}
+          addedIds={new Set(entries.map((e) => e.exerciseId))}
+          onPick={addExercise}
           onClose={entries.length ? () => setPickerOpen(false) : undefined}
         />
       ) : (
-        <Button type="button" variant="secondary" className="w-full" onClick={() => setPickerOpen(true)}>
+        <Button type="button" variant="secondary" className="w-full py-3" onClick={() => setPickerOpen(true)}>
           <Plus className="size-4" /> Thêm bài tập
         </Button>
       )}
 
-      <div className="sticky bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-10 md:bottom-4">
-        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface/95 p-3 shadow-lg backdrop-blur">
-          <div className="min-w-0 text-sm">
-            <div className="font-semibold tabular-nums text-burn">
-              {kcal(overrideKcal ?? estimate)} kcal
-              {overrideKcal != null && <span className="ml-1.5 font-normal text-muted line-through">{kcal(estimate)}</span>}
+      <section className="rounded-2xl border border-border bg-surface">
+        <button
+          type="button"
+          aria-expanded={optionsOpen}
+          aria-controls="workout-options"
+          onClick={() => setOptionsOpen((o) => !o)}
+          className="flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left hover:bg-surface-2 sm:px-5"
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-medium">Tùy chọn</span>
+            <span className="block truncate text-xs text-muted">
+              {isDayKey(date) ? formatDayLong(date) : "Chưa chọn ngày"} · {startTime || "--:--"}
+              {overrideKcal != null && ` · đồng hồ ${kcal(overrideKcal)} kcal`}
+              {note.trim() && " · có ghi chú"}
+            </span>
+          </span>
+          <ChevronDown className={cn("size-4 shrink-0 text-muted transition", optionsOpen && "rotate-180")} />
+        </button>
+        {optionsOpen && (
+          <div id="workout-options" className="space-y-3 border-t border-border px-4 pt-3 pb-4 sm:px-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Field label="Ngày">
+                <input type="date" required value={date} onChange={(e) => changeDate(e.target.value)} className={FIELD} />
+              </Field>
+              <Field label="Giờ bắt đầu">
+                <input type="time" required value={startTime} onChange={(e) => setStartTime(e.target.value)} className={FIELD} />
+              </Field>
+              <Field label="Tổng thời gian (phút)" hint="Để trống = tổng phút tập" className="col-span-2 sm:col-span-1">
+                <input
+                  inputMode="numeric"
+                  value={duration}
+                  placeholder={String(Math.round(totalMinutes))}
+                  onChange={(e) => setDuration(e.target.value)}
+                  className={FIELD}
+                />
+              </Field>
+              <Field
+                label="Calo từ đồng hồ thông minh"
+                hint={`Thay cho ước tính MET (tính với ${num(weight)} kg)`}
+                className="col-span-2 sm:col-span-1"
+              >
+                <input inputMode="numeric" value={override} placeholder="kcal" onChange={(e) => setOverride(e.target.value)} className={FIELD} />
+              </Field>
             </div>
-            <div className="truncate text-xs text-muted">
-              {Math.round(parseNum(duration) ?? totalMinutes)} phút
-              {volume > 0 && ` · ${num(volume, 0)} kg khối lượng`} · tính với {num(weight)} kg
-            </div>
-            {error && <div className="mt-1 text-xs text-danger">{error}</div>}
+            <Field label="Ghi chú">
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Cảm giác, giấc ngủ, chấn thương…"
+                className={cn(
+                  "min-h-20 w-full rounded-xl border border-border bg-surface px-3 py-2 text-base outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 sm:text-sm",
+                  CLEAR_OF_BAR,
+                )}
+              />
+            </Field>
           </div>
-          <Button type="submit" disabled={saving || !entries.length} className="shrink-0">
-            {saving ? "Đang lưu…" : "Lưu buổi tập"}
-          </Button>
+        )}
+      </section>
+
+      {/* Last child of the form: sticky never covers the content above it once you scroll to the end. */}
+      <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 md:bottom-4">
+        <div className="rounded-2xl border border-border bg-surface/95 p-3 shadow-lg backdrop-blur">
+          {error && (
+            <p role="alert" className="mb-2 text-sm text-danger">
+              {error}
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-lg leading-tight font-semibold tabular-nums text-burn">
+                {kcal(overrideKcal ?? estimate)} kcal
+                {overrideKcal != null && <span className="ml-1.5 text-sm font-normal text-muted line-through">{kcal(estimate)}</span>}
+              </div>
+              <div className="truncate text-xs text-muted tabular-nums">
+                {Math.round(parseNum(duration) ?? totalMinutes)} phút · {entries.length} bài
+                {volume > 0 && ` · ${num(volume, 0)} kg tạ`}
+              </div>
+            </div>
+            <Button type="submit" disabled={busy || !entries.length} className="shrink-0 px-5 py-3">
+              {busy ? "Đang lưu…" : "Lưu buổi tập"}
+            </Button>
+          </div>
         </div>
       </div>
     </form>
+  );
+}
+
+/** Number field with large -/+ buttons for one-thumb entry. */
+function Stepper({
+  label,
+  value,
+  step,
+  decimal = false,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  step: number;
+  decimal?: boolean;
+  placeholder?: string;
+  onChange: (v: string) => void;
+}) {
+  const btn = "grid w-9 shrink-0 place-items-center text-muted transition hover:bg-surface-2 active:bg-surface-2 active:text-foreground";
+  return (
+    <div className="flex h-11 min-w-0 items-stretch overflow-hidden rounded-xl border border-border bg-surface focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
+      <button type="button" tabIndex={-1} aria-label={`Giảm ${label}`} onClick={() => onChange(stepValue(value, -step))} className={btn}>
+        <Minus className="size-4" />
+      </button>
+      <input
+        inputMode={decimal ? "decimal" : "numeric"}
+        enterKeyHint="next"
+        aria-label={label}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={(e) => e.currentTarget.select()}
+        className={cn("w-full min-w-0 bg-transparent text-center text-base tabular-nums outline-none placeholder:text-muted/70", CLEAR_OF_BAR)}
+      />
+      <button type="button" tabIndex={-1} aria-label={`Tăng ${label}`} onClick={() => onChange(stepValue(value, step))} className={btn}>
+        <Plus className="size-4" />
+      </button>
+    </div>
   );
 }
 
@@ -243,6 +393,7 @@ function EntryCard({
   index,
   entry: e,
   exercise: ex,
+  last,
   kcalValue,
   onChange,
   onSets,
@@ -251,6 +402,7 @@ function EntryCard({
   index: number;
   entry: EntryRow;
   exercise: ExerciseOption;
+  last?: ExerciseHabit;
   kcalValue: number;
   onChange: (fn: (e: EntryRow) => EntryRow) => void;
   onSets: (fn: (sets: SetRow[]) => SetRow[]) => void;
@@ -260,7 +412,7 @@ function EntryCard({
   const setSet = (key: string, patch: Partial<SetRow>) => onSets((sets) => sets.map((s) => (s.key === key ? { ...s, ...patch } : s)));
 
   return (
-    <Card className="space-y-3">
+    <Card id={`entry-${e.key}`} className="scroll-mt-20 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="font-medium">
@@ -272,6 +424,7 @@ function EntryCard({
             {ex.muscleGroup && <Badge>{ex.muscleGroup}</Badge>}
             <Badge>MET {num(ex.met)}</Badge>
           </div>
+          {e.prefilledFrom && <p className="mt-1.5 text-xs text-muted">Điền sẵn theo lần tập {formatDayShort(e.prefilledFrom)}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <span className="text-sm font-semibold tabular-nums text-burn">{kcal(kcalValue)} kcal</span>
@@ -282,43 +435,43 @@ function EntryCard({
       </div>
 
       {strength && (
-        <div>
-          <div className="grid grid-cols-[2rem_1fr_1fr_2.25rem] gap-2 px-1 pb-1 text-xs text-muted">
-            <span>Set</span>
-            <span>Số lần</span>
-            <span>Tạ (kg)</span>
+        <div className="sm:max-w-lg">
+          <div className="grid grid-cols-[1.25rem_1fr_1fr_2rem] gap-1.5 pb-1 text-xs text-muted">
+            <span />
+            <span className="text-center">Số lần</span>
+            <span className="text-center">Tạ (kg)</span>
             <span />
           </div>
           <div className="space-y-2">
             {e.sets.map((s, j) => (
-              <div key={s.key} className="grid grid-cols-[2rem_1fr_1fr_2.25rem] items-center gap-2">
+              <div key={s.key} className="grid grid-cols-[1.25rem_1fr_1fr_2rem] items-center gap-1.5">
                 <span className="text-center text-sm text-muted tabular-nums">{j + 1}</span>
-                <Input inputMode="numeric" aria-label={`Số lần set ${j + 1}`} value={s.reps} onChange={(ev) => setSet(s.key, { reps: ev.target.value })} />
-                <Input inputMode="decimal" aria-label={`Tạ set ${j + 1}`} value={s.kg} onChange={(ev) => setSet(s.key, { kg: ev.target.value })} />
+                <Stepper label={`số lần set ${j + 1}`} value={s.reps} step={1} onChange={(v) => setSet(s.key, { reps: v })} />
+                <Stepper label={`tạ set ${j + 1}`} value={s.kg} step={KG_STEP} decimal placeholder="–" onChange={(v) => setSet(s.key, { kg: v })} />
                 <button
                   type="button"
                   aria-label={`Xoá set ${j + 1}`}
                   onClick={() => onSets((sets) => sets.filter((x) => x.key !== s.key))}
-                  className="rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-danger"
+                  className="grid h-11 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-danger"
                 >
                   <X className="size-4" />
                 </button>
               </div>
             ))}
           </div>
-          <div className="mt-2 flex gap-2">
-            <Button type="button" variant="secondary" className="flex-1 px-2" onClick={() => onSets((sets) => [...sets, newSet()])}>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Button type="button" variant="secondary" className="px-2 py-2.5" onClick={() => onSets((sets) => [...sets, newSet()])}>
               <Plus className="size-4" /> Thêm set
             </Button>
             <Button
               type="button"
               variant="secondary"
-              className="flex-1 px-2"
+              className="px-2 py-2.5"
               disabled={!e.sets.length}
               onClick={() =>
                 onSets((sets) => {
-                  const last = sets[sets.length - 1];
-                  return last ? [...sets, newSet(last.reps, last.kg)] : sets;
+                  const lastSet = sets[sets.length - 1];
+                  return lastSet ? [...sets, newSet(lastSet.reps, lastSet.kg)] : sets;
                 })
               }
             >
@@ -328,28 +481,39 @@ function EntryCard({
         </div>
       )}
 
-      <div className={cn("grid gap-3", strength ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3")}>
-        <Field label={strength ? "Phút tập thực tế" : "Thời gian (phút)"} hint={strength && e.minutesAuto ? `Ước tính ${MINUTES_PER_SET} phút/set` : undefined}>
-          <Input inputMode="decimal" value={e.minutes} onChange={(ev) => onChange((x) => ({ ...x, minutes: ev.target.value, minutesAuto: false }))} />
-        </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <span className="text-sm font-medium">{strength ? "Phút tập thực tế" : "Thời gian (phút)"}</span>
+          <Stepper
+            label="số phút"
+            value={e.minutes}
+            step={5}
+            decimal
+            onChange={(v) => onChange((x) => ({ ...x, minutes: v, minutesAuto: false }))}
+          />
+          {strength && e.minutesAuto && <span className="block text-xs text-muted">Ước tính {MINUTES_PER_SET} phút/set</span>}
+        </div>
         {!strength && (
           <Field label="Quãng đường (km)">
-            <Input inputMode="decimal" value={e.distance} placeholder="Tuỳ chọn" onChange={(ev) => onChange((x) => ({ ...x, distance: ev.target.value }))} />
+            <input
+              inputMode="decimal"
+              value={e.distance}
+              placeholder={last?.distanceKm != null ? `Lần trước ${num(last.distanceKm)}` : "Tuỳ chọn"}
+              onChange={(ev) => onChange((x) => ({ ...x, distance: ev.target.value }))}
+              className={FIELD}
+            />
           </Field>
         )}
-        <div className={cn("space-y-1", !strength && "col-span-2 sm:col-span-1")}>
+        <div className={cn("space-y-1", !strength && "col-span-2")}>
           <span className="text-sm font-medium">Cường độ</span>
-          <div className="grid grid-cols-3 gap-1 rounded-xl border border-border p-1">
+          <div className="grid h-11 grid-cols-3 gap-1 rounded-xl border border-border p-1">
             {INTENSITIES.map((it) => (
               <button
                 key={it}
                 type="button"
                 aria-pressed={e.intensity === it}
                 onClick={() => onChange((x) => ({ ...x, intensity: it }))}
-                className={cn(
-                  "rounded-lg py-1.5 text-sm transition",
-                  e.intensity === it ? "bg-accent text-accent-fg" : "text-muted hover:bg-surface-2",
-                )}
+                className={cn("rounded-lg text-sm transition", e.intensity === it ? "bg-accent text-accent-fg" : "text-muted hover:bg-surface-2")}
               >
                 {INTENSITY_LABEL[it]}
               </button>
@@ -361,30 +525,60 @@ function EntryCard({
   );
 }
 
+type PickerFilter = Category | "all" | "recent";
+
+const RECENT_LIMIT = 12;
+
+function lastTimeText(h: ExerciseHabit): string {
+  const sets = setsSummary(h.sets);
+  return `Lần trước ${formatDayShort(h.lastDate)}: ${sets || `${num(h.durationMin, 0)} phút`}`;
+}
+
 function ExercisePicker({
   exercises,
+  habits,
+  habitById,
+  addedIds,
   onPick,
   onClose,
 }: {
   exercises: ExerciseOption[];
+  habits: ExerciseHabit[];
+  habitById: Map<string, ExerciseHabit>;
+  addedIds: Set<string>;
   onPick: (ex: ExerciseOption) => void;
   onClose?: () => void;
 }) {
-  const [q, setQ] = useState("");
-  const [cat, setCat] = useState<Category | "all">("all");
-  const needle = q.trim().toLowerCase();
-  const list = exercises.filter(
-    (e) =>
-      (cat === "all" || e.category === cat) &&
-      (!needle || e.name.toLowerCase().includes(needle) || e.muscleGroup?.toLowerCase().includes(needle)),
+  const byId = useMemo(() => new Map(exercises.map((e) => [e.id, e])), [exercises]);
+  const recent = useMemo(
+    () =>
+      habits
+        .map((h) => byId.get(h.exerciseId))
+        .filter((e): e is ExerciseOption => e != null)
+        .slice(0, RECENT_LIMIT),
+    [habits, byId],
   );
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<PickerFilter>(recent.length ? "recent" : "all");
+  const needle = q.trim().toLowerCase();
+  const matches = (e: ExerciseOption) => !needle || e.name.toLowerCase().includes(needle) || !!e.muscleGroup?.toLowerCase().includes(needle);
+  // Typing searches the whole library; "Hay tập" is only a shortlist.
+  const list =
+    filter === "recent" && !needle
+      ? recent
+      : exercises.filter((e) => (filter === "all" || filter === "recent" || e.category === filter) && matches(e));
+  const chips: { value: PickerFilter; label: string }[] = [
+    ...(recent.length ? [{ value: "recent" as const, label: "Hay tập" }] : []),
+    { value: "all", label: "Tất cả" },
+    ...CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c] })),
+  ];
 
   return (
     <Card>
       <CardTitle
         action={
           onClose && (
-            <button type="button" onClick={onClose} aria-label="Đóng" className="rounded-lg p-1.5 text-muted hover:bg-surface-2">
+            <button type="button" onClick={onClose} aria-label="Đóng" className="-m-1.5 rounded-lg p-2 text-muted hover:bg-surface-2">
               <X className="size-4" />
             </button>
           )
@@ -394,38 +588,63 @@ function ExercisePicker({
       </CardTitle>
       <div className="relative">
         <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
-        <Input autoFocus={!!onClose} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tìm bài tập hoặc nhóm cơ" className="pl-9" />
+        <input
+          type="search"
+          enterKeyHint="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Tìm bài tập hoặc nhóm cơ"
+          aria-label="Tìm bài tập"
+          className="h-11 w-full rounded-xl border border-border bg-surface pr-3 pl-9 text-base outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 sm:text-sm"
+        />
       </div>
       <div className="-mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
-        {(["all", ...CATEGORIES] as const).map((c) => (
+        {chips.map((c) => (
           <button
-            key={c}
+            key={c.value}
             type="button"
-            onClick={() => setCat(c)}
+            aria-pressed={filter === c.value}
+            onClick={() => setFilter(c.value)}
             className={cn(
-              "shrink-0 rounded-full border px-3 py-1 text-sm transition",
-              cat === c ? "border-accent bg-accent/10 text-accent" : "border-border text-muted hover:bg-surface-2",
+              "shrink-0 rounded-full border px-3.5 py-1.5 text-sm transition",
+              filter === c.value ? "border-accent bg-accent/10 text-accent" : "border-border text-muted hover:bg-surface-2",
             )}
           >
-            {c === "all" ? "Tất cả" : CATEGORY_LABEL[c]}
+            {c.label}
           </button>
         ))}
       </div>
-      <ul className="mt-2 max-h-80 divide-y divide-border overflow-y-auto">
-        {list.map((e) => (
-          <li key={e.id}>
-            <button type="button" onClick={() => onPick(e)} className="flex w-full items-center justify-between gap-2 px-1 py-2.5 text-left hover:bg-surface-2">
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{e.name}</span>
-                <span className="block text-xs text-muted">
-                  {categoryLabel(e.category)}
-                  {e.muscleGroup && ` · ${e.muscleGroup}`} · MET {num(e.met)}
+      <ul className="mt-2 max-h-[min(26rem,55dvh)] divide-y divide-border overflow-y-auto overscroll-contain">
+        {list.map((e) => {
+          const h = habitById.get(e.id);
+          const added = addedIds.has(e.id);
+          return (
+            <li key={e.id}>
+              <button type="button" onClick={() => onPick(e)} className="flex w-full items-center justify-between gap-2 px-1 py-3 text-left hover:bg-surface-2">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{e.name}</span>
+                  <span className="block truncate text-xs text-muted">
+                    {h ? (
+                      lastTimeText(h)
+                    ) : (
+                      <>
+                        {categoryLabel(e.category)}
+                        {e.muscleGroup && ` · ${e.muscleGroup}`} · MET {num(e.met)}
+                      </>
+                    )}
+                  </span>
                 </span>
-              </span>
-              <Plus className="size-4 shrink-0 text-accent" />
-            </button>
-          </li>
-        ))}
+                {added ? (
+                  <span className="flex shrink-0 items-center gap-1 text-xs text-accent">
+                    <Check className="size-4" /> Đã thêm
+                  </span>
+                ) : (
+                  <Plus className="size-5 shrink-0 text-accent" />
+                )}
+              </button>
+            </li>
+          );
+        })}
         {!list.length && <li className="py-6 text-center text-sm text-muted">Không tìm thấy bài tập.</li>}
       </ul>
     </Card>
