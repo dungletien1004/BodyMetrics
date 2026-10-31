@@ -4,11 +4,11 @@ Tài liệu bàn giao để một AI/dev khác tiếp tục. Đọc kèm `CLAUDE
 
 ## 1. Trạng thái hiện tại
 
-- **Production:** https://bodymetrics-gamma.vercel.app — Vercel (Hobby) + Neon Postgres Free (Singapore). Bản mới nhất được deploy trực tiếp từ source local commit `afd37ab` ngày 31/10/2026 (deployment `dpl_DcCEu8JeSVVPHWW8jaqc8HNbCbhb`, trạng thái READY).
+- **Production:** https://bodymetrics-gamma.vercel.app — Vercel (Hobby) + Neon Postgres Free (Singapore). Bản mới nhất được deploy trực tiếp từ source local commit `f1b1a18` ngày 31/10/2026 (deployment `dpl_AtXadbsNsx8UMCov3kbVRFM29LPV`, trạng thái READY; `/api/health` trả `{"ok":true}`).
 - **Deploy:** chưa bật auto-deploy từ GitHub (Vercel GitHub App chưa cài). Deploy bằng CLI: `npx vercel@65.7.0 deploy --prod --yes`; Vercel CLI đã đăng nhập và project `bodymetrics` đã link trong `.vercel/`.
 - **Build trên Vercel:** script `vercel-build` = `tsx prisma/pre-push.ts && prisma db push --skip-generate && prisma db seed && next build`. `pre-push.ts` là bước chuyển đổi dữ liệu idempotent (single-user → multi-user, onboardedAt…).
 - **Tính năng đã có:** đa tài khoản (admin/user, admin tạo tài khoản, bắt đổi mật khẩu lần đầu, admin "xem dữ liệu" chỉ đọc), onboarding 3 bước, ăn uống (kho 282 món Việt, tìm không dấu, chọn khẩu phần, "Ăn lại", chống lưu trùng), tập luyện (MET, set/rep, thư viện bài tập, tiến độ 1RM), cơ thể (cân nặng, số đo, ảnh tiến trình), phân tích (TDEE thích nghi, biểu đồ theo tuần), connector Claude OAuth 2.1 cá nhân (`/api/mcp`) và nhóm dùng chung (`/api/mcp/shared/<groupId>`). Mọi công cụ MCP nhận `profile_username` rõ ràng (ví dụ `bm_demo_an`), kiểm tra quyền theo user và trả username đã chọn. Phân tích ảnh/báo cáo mới dùng Claude Web connector; app không gọi Anthropic API.
-- **GitHub chưa đồng bộ:** `main` local đang đi trước `origin/main` 7 commit; không push trong lượt này. Production đã được deploy trực tiếp từ local commit `afd37ab`.
+- **GitHub chưa đồng bộ:** `main` local có các commit chưa push; không push nếu người dùng chưa yêu cầu. Production được deploy trực tiếp từ source local bằng Vercel CLI.
 - **Claude dùng chung nhiều hồ sơ:** mỗi user tự tham gia bằng mã; chủ nhóm kết nối một Claude account; công cụ MCP yêu cầu username hồ sơ tường minh và kiểm tra membership ở mỗi lần gọi. OAuth E2E local bao phủ hai user và username đích.
 
 ## 2. Việc đang làm dở (ưu tiên)
