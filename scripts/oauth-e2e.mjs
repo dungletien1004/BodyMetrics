@@ -269,15 +269,21 @@ async function main() {
       const groupAuthorization = await authorize(groupResource, ownerSession.cookie);
       const groupToken = await (await exchange(groupAuthorization)).json();
       check(groupToken.access_token && groupToken.refresh_token, "Claude receives a token scoped to the shared group");
-      check((await mcp(groupToken.access_token, "tools/list", {}, 50, groupEndpoint)).status === 200, "group token works only on its shared endpoint");
+      const groupTools = await mcp(groupToken.access_token, "tools/list", {}, 50, groupEndpoint);
+      check(groupTools.status === 200, "group token works only on its shared endpoint");
+      const progressTool = groupTools.body?.result?.tools?.find((tool) => tool.name === "get_progress");
+      check(
+        progressTool?.inputSchema?.required?.includes("profile_username") && progressTool?.inputSchema?.properties?.profile_username,
+        "data tools require a BodyMetrics username",
+      );
       check((await mcp(groupToken.access_token, "tools/list", {}, 51)).status === 401, "group token is rejected by the personal endpoint");
       check((await mcp(live.access_token, "tools/list", {}, 52, groupEndpoint)).status === 401, "personal token is rejected by the shared endpoint");
 
       const listProfiles = await mcp(groupToken.access_token, "tools/call", { name: "list_profiles", arguments: {} }, 53, groupEndpoint);
       const profilesText = JSON.stringify(listProfiles.body);
       check(
-        listProfiles.status === 200 && profilesText.includes(ownerSession.id) && profilesText.includes(memberSession.id),
-        "Claude can list only the explicitly joined profiles",
+        listProfiles.status === 200 && profilesText.includes(ownerSession.username) && profilesText.includes(memberSession.username),
+        "Claude receives exact BodyMetrics usernames for joined profiles",
         profilesText,
       );
 
@@ -288,30 +294,42 @@ async function main() {
         54,
         groupEndpoint,
       );
-      check(missingProfile.status === 200 && JSON.stringify(missingProfile.body).includes("profile_id"), "data tool requires explicit profile_id");
+      check(missingProfile.status === 200 && JSON.stringify(missingProfile.body).includes("profile_username"), "data tool requires explicit profile_username");
 
       const outsideProfile = await mcp(
         groupToken.access_token,
         "tools/call",
-        { name: "get_progress", arguments: { profile_id: "not-a-group-member", days: 1 } },
+        { name: "get_progress", arguments: { profile_username: "not-a-group-member", days: 1 } },
         55,
         groupEndpoint,
       );
       check(JSON.stringify(outsideProfile.body).includes("chưa tham gia nhóm"), "group token cannot select a profile outside its membership");
 
-      const logFor = (profileId, note, weight) =>
+      const personalCrossProfile = await mcp(
+        live.access_token,
+        "tools/call",
+        { name: "get_progress", arguments: { profile_username: memberSession.username, days: 1 } },
+        57,
+      );
+      check(JSON.stringify(personalCrossProfile.body).includes("không khớp với hồ sơ"), "personal token cannot select another user's username");
+
+      const logFor = (profileUsername, note, weight) =>
         mcp(
           groupToken.access_token,
           "tools/call",
-          { name: "log_body", arguments: { profile_id: profileId, weight_kg: weight, date: "2000-01-01", note } },
+          { name: "log_body", arguments: { profile_username: profileUsername, weight_kg: weight, date: "2000-01-01", note } },
           56,
           groupEndpoint,
         );
       const [ownerLog, memberLog] = await Promise.all([
-        logFor(ownerSession.id, ownerNote, 81.2),
-        logFor(memberSession.id, memberNote, 62.4),
+        logFor(ownerSession.username, ownerNote, 81.2),
+        logFor(memberSession.username, memberNote, 62.4),
       ]);
-      check(ownerLog.status === 200 && memberLog.status === 200, "Claude can write to either selected group profile");
+      check(ownerLog.status === 200 && memberLog.status === 200, "Claude can write by exact BodyMetrics username");
+      check(
+        JSON.stringify(ownerLog.body).includes(ownerSession.username) && JSON.stringify(memberLog.body).includes(memberSession.username),
+        "write results confirm the selected BodyMetrics username",
+      );
 
       const ownerRow = await groupDb.bodyLog.findFirst({ where: { userId: ownerSession.id, note: ownerNote }, select: { userId: true, weightKg: true } });
       const memberRow = await groupDb.bodyLog.findFirst({ where: { userId: memberSession.id, note: memberNote }, select: { userId: true, weightKg: true } });
@@ -320,7 +338,7 @@ async function main() {
       check(
         ownerRow?.userId === ownerSession.id && ownerRow.weightKg === 81.2 &&
           memberRow?.userId === memberSession.id && memberRow.weightKg === 62.4 && !wrongOwnerRow && !wrongMemberRow,
-        "profile-selected writes stay isolated to the selected BodyMetrics user",
+        "username-selected writes stay isolated to the selected BodyMetrics user",
       );
     } finally {
       await groupDb.bodyLog.deleteMany({ where: { userId: ownerSession.id, note: ownerNote } });

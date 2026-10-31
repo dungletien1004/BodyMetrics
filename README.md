@@ -40,7 +40,7 @@ Chạy `npm run dev -- -H 0.0.0.0` rồi mở địa chỉ IP của máy tính t
 
 ## Deploy và kết nối với Claude
 
-Xem [DEPLOY.md](DEPLOY.md): deploy miễn phí lên Vercel với database Neon, rồi kết nối BodyMetrics với Claude. Mỗi người có thể kết nối tài khoản riêng; nhiều tài khoản BodyMetrics cũng có thể tự tham gia một nhóm để dùng chung một connector Claude, với quyền tách theo hồ sơ đã chọn.
+Xem [DEPLOY.md](DEPLOY.md): deploy miễn phí lên Vercel với database Neon, rồi kết nối BodyMetrics với Claude. Mỗi người có thể kết nối tài khoản riêng; nhiều tài khoản BodyMetrics cũng có thể tự tham gia một nhóm để dùng chung một connector Claude. Mỗi lần thao tác, Claude gửi đúng username BodyMetrics để chọn hồ sơ và quyền vẫn được kiểm tra riêng.
 
 ## Dữ liệu
 

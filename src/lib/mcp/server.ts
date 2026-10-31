@@ -12,7 +12,7 @@ import { deleteImage } from "../storage";
 
 export const MCP_INSTRUCTIONS = `BodyMetrics là nhật ký giảm cân của người dùng (tiếng Việt). Dùng các công cụ này để ghi và đọc dữ liệu thật của họ.
 
-- Trước mỗi thao tác, gọi list_profiles. Chọn hồ sơ theo yêu cầu hiện tại của người dùng; nếu chưa rõ thì hỏi lại. Truyền đúng profile_id vào mọi công cụ đọc/ghi/xóa. Không tự đoán hồ sơ từ nội dung nhật ký.
+- Trước mỗi thao tác, gọi list_profiles. Chọn theo username BodyMetrics mà người dùng nêu và truyền đúng profile_username (ví dụ bm_demo_an) vào mọi công cụ đọc/ghi/xóa. Nếu chưa rõ username nào, hỏi lại; không mặc định chủ nhóm hay đoán từ nội dung nhật ký. Không truyền profile_id thay cho username.
 - Ảnh bữa ăn: nhận diện từng món, ước lượng gram, kcal, đạm, tinh bột, béo (tính cả dầu mỡ, nước sốt, đường trong đồ uống), rồi gọi log_meal. Tên món bằng tiếng Việt. Nếu không rõ bữa nào, đoán theo giờ (sáng < 10h, trưa 10-14h, tối 17-21h, còn lại ăn vặt).
 - Ảnh/ghi chú buổi tập (ảnh màn hình đồng hồ, máy chạy, nhật ký gym): gọi list_exercises để tìm đúng tên bài tập, rồi log_workout. Nếu đồng hồ cho số kcal, truyền vào kcal_override.
 - Ảnh cân hoặc số đo: gọi log_body.
@@ -31,7 +31,10 @@ const hhmm = z
   .regex(/^\d{2}:\d{2}$/)
   .optional()
   .describe("Giờ HH:mm; mặc định bây giờ");
-const profileIdField = z.string().min(1).describe("profile_id lấy từ list_profiles; phải chọn đúng hồ sơ cho yêu cầu hiện tại");
+const profileUsernameField = z
+  .string()
+  .min(1)
+  .describe("Username BodyMetrics chính xác lấy từ list_profiles, ví dụ bm_demo_an; phải khớp hồ sơ người dùng yêu cầu");
 const n = (max: number) => z.number().finite().min(0).max(max);
 
 function nowHHmm() {
@@ -58,27 +61,28 @@ function authContext(ctx: ToolContext) {
   return { userId, connectionGroupId: typeof connectionGroupId === "string" ? connectionGroupId : null };
 }
 
-async function actingUser(ctx: ToolContext, profileId: string): Promise<string> {
+async function actingProfile(ctx: ToolContext, profileUsername: string): Promise<{ userId: string; profileUsername: string }> {
   const auth = authContext(ctx);
-  if (!profileId) throw new Error("Cần chọn profile_id từ list_profiles trước khi thao tác.");
+  if (!profileUsername) throw new Error("Cần chọn profile_username từ list_profiles trước khi thao tác.");
   if (!auth.connectionGroupId) {
-    if (profileId !== auth.userId) throw new Error("Connector này chỉ được cấp quyền cho một hồ sơ BodyMetrics.");
-    const active = await db.user.findFirst({ where: { id: profileId, active: true }, select: { id: true } });
-    if (!active) throw new Error("Tài khoản BodyMetrics đã bị khóa.");
-    return profileId;
+    const profile = await db.user.findFirst({
+      where: { id: auth.userId, username: profileUsername, active: true },
+      select: { id: true, username: true },
+    });
+    if (!profile) throw new Error("Username không khớp với hồ sơ được cấp quyền cho connector này.");
+    return { userId: profile.id, profileUsername: profile.username };
   }
 
   const membership = await db.mcpConnectionGroupMember.findFirst({
     where: {
       groupId: auth.connectionGroupId,
-      userId: profileId,
       group: { ownerUserId: auth.userId },
-      user: { active: true },
+      user: { username: profileUsername, active: true },
     },
-    select: { userId: true },
+    select: { userId: true, user: { select: { username: true } } },
   });
   if (!membership) throw new Error("Hồ sơ này chưa tham gia nhóm Claude hoặc đã rời nhóm.");
-  return membership.userId;
+  return { userId: membership.userId, profileUsername: membership.user.username };
 }
 
 async function listProfiles(ctx: ToolContext) {
@@ -86,7 +90,7 @@ async function listProfiles(ctx: ToolContext) {
   if (!auth.connectionGroupId) {
     const user = await db.user.findFirst({ where: { id: auth.userId, active: true }, select: { id: true, username: true, name: true } });
     if (!user) throw new Error("Tài khoản BodyMetrics đã bị khóa.");
-    return [{ profile_id: user.id, username: user.username, name: user.name.trim() || user.username }];
+    return [{ profile_username: user.username, name: user.name.trim() || user.username }];
   }
 
   const members = await db.mcpConnectionGroupMember.findMany({
@@ -94,7 +98,7 @@ async function listProfiles(ctx: ToolContext) {
     orderBy: { joinedAt: "asc" },
     select: { user: { select: { id: true, username: true, name: true } } },
   });
-  return members.map(({ user }) => ({ profile_id: user.id, username: user.username, name: user.name.trim() || user.username }));
+  return members.map(({ user }) => ({ profile_username: user.username, name: user.name.trim() || user.username }));
 }
 
 function fail(message: string) {
@@ -168,10 +172,13 @@ export function registerTools(server: McpServer) {
     {
       title: "Tổng kết một ngày",
       description: "Calo đã ăn, mục tiêu, còn lại, calo tập, macro, cân nặng và danh sách bữa ăn/buổi tập của một ngày.",
-      inputSchema: z.object({ profile_id: profileIdField, date: day }),
+      inputSchema: z.object({ profile_username: profileUsernameField, date: day }),
       annotations: { readOnlyHint: true },
     },
-    async ({ profile_id, date }, ctx) => json(await dayOverview(await actingUser(ctx, profile_id), date ?? todayKey())),
+    async ({ profile_username, date }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      return json({ profile_username: profile.profileUsername, ...(await dayOverview(profile.userId, date ?? todayKey())) });
+    },
   );
 
   server.registerTool(
@@ -179,14 +186,16 @@ export function registerTools(server: McpServer) {
     {
       title: "Tiến độ nhiều ngày",
       description: "Tổng hợp theo ngày trong N ngày gần nhất (calo nạp, tiêu hao, cân bằng, protein, cân nặng) cùng hồ sơ và mục tiêu.",
-      inputSchema: z.object({ profile_id: profileIdField, days: z.number().int().min(1).max(90).default(14) }),
+      inputSchema: z.object({ profile_username: profileUsernameField, days: z.number().int().min(1).max(90).default(14) }),
       annotations: { readOnlyHint: true },
     },
-    async ({ profile_id, days }, ctx) => {
-      const userId = await actingUser(ctx, profile_id);
+    async ({ profile_username, days }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      const userId = profile.userId;
       const to = todayKey();
       const [rows, p] = await Promise.all([getDaySummaries(userId, shiftDay(to, -(days - 1)), to), getProfile(userId)]);
       return json({
+        profile_username: profile.profileUsername,
         profile: { goal_weight_kg: p.goalWeightKg, daily_deficit_kcal: p.dailyDeficit, protein_per_kg: p.proteinPerKg },
         days: rows.map((d) => ({
           date: d.date,
@@ -208,7 +217,7 @@ export function registerTools(server: McpServer) {
       title: "Ghi bữa ăn",
       description: "Lưu một bữa ăn với các món đã ước lượng. Trả về id bữa ăn và tổng kết ngày sau khi lưu.",
       inputSchema: z.object({
-        profile_id: profileIdField,
+        profile_username: profileUsernameField,
         meal_type: z.enum(["breakfast", "lunch", "dinner", "snack"]).describe("breakfast=sáng, lunch=trưa, dinner=tối, snack=ăn vặt"),
         items: z
           .array(
@@ -229,8 +238,9 @@ export function registerTools(server: McpServer) {
         note: z.string().max(1000).optional(),
       }),
     },
-    async ({ profile_id, meal_type, items, date, time, note }, ctx) => {
-      const userId = await actingUser(ctx, profile_id);
+    async ({ profile_username, meal_type, items, date, time, note }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      const userId = profile.userId;
       const d = date ?? todayKey();
       const meal = await db.meal.create({
         data: {
@@ -253,7 +263,7 @@ export function registerTools(server: McpServer) {
           },
         },
       });
-      return json({ saved_meal_id: meal.id, day: await dayOverview(userId, d) });
+      return json({ profile_username: profile.profileUsername, saved_meal_id: meal.id, day: await dayOverview(userId, d) });
     },
   );
 
@@ -262,17 +272,19 @@ export function registerTools(server: McpServer) {
     {
       title: "Danh sách bài tập",
       description: "Tìm bài tập trong thư viện (tên, loại, MET) để dùng đúng tên khi gọi log_workout.",
-      inputSchema: z.object({ profile_id: profileIdField, query: z.string().optional() }),
+      inputSchema: z.object({ profile_username: profileUsernameField, query: z.string().optional() }),
       annotations: { readOnlyHint: true },
     },
-    async ({ profile_id, query }, ctx) => {
+    async ({ profile_username, query }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
       const q = query?.trim().toLowerCase();
-      const all = await exercisesFor(await actingUser(ctx, profile_id));
-      return json(
-        all
+      const all = await exercisesFor(profile.userId);
+      return json({
+        profile_username: profile.profileUsername,
+        exercises: all
           .filter((e) => !q || e.name.toLowerCase().includes(q) || e.muscleGroup?.toLowerCase().includes(q))
           .map((e) => ({ name: e.name, category: e.category, met: e.met, muscle_group: e.muscleGroup })),
-      );
+      });
     },
   );
 
@@ -283,7 +295,7 @@ export function registerTools(server: McpServer) {
       description:
         "Lưu buổi tập. Calo mỗi bài được tính theo MET và cân nặng của người dùng; truyền kcal_override nếu có số từ đồng hồ. Bài tập chưa có trong thư viện sẽ được tạo nếu kèm met.",
       inputSchema: z.object({
-        profile_id: profileIdField,
+        profile_username: profileUsernameField,
         entries: z
           .array(
             z.object({
@@ -305,8 +317,9 @@ export function registerTools(server: McpServer) {
         note: z.string().max(2000).optional(),
       }),
     },
-    async ({ profile_id, entries, date, start_time, duration_min, kcal_override, note }, ctx) => {
-      const userId = await actingUser(ctx, profile_id);
+    async ({ profile_username, entries, date, start_time, duration_min, kcal_override, note }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      const userId = profile.userId;
       const d = date ?? todayKey();
       const weight = await getWeightOn(userId, d);
       const resolved = [];
@@ -348,6 +361,7 @@ export function registerTools(server: McpServer) {
         include: { entries: { include: { exercise: true } } },
       });
       return json({
+        profile_username: profile.profileUsername,
         saved_workout_id: workout.id,
         exercises: workout.entries.map((e) => ({ name: e.exercise.name, kcal: e.kcal })),
         day: await dayOverview(userId, d),
@@ -361,7 +375,7 @@ export function registerTools(server: McpServer) {
       title: "Ghi chỉ số cơ thể",
       description: "Lưu cân nặng, vòng eo và/hoặc % mỡ.",
       inputSchema: z.object({
-        profile_id: profileIdField,
+        profile_username: profileUsernameField,
         weight_kg: z.number().min(25).max(350).optional(),
         waist_cm: z.number().min(30).max(250).optional(),
         body_fat_pct: z.number().min(2).max(70).optional(),
@@ -369,13 +383,14 @@ export function registerTools(server: McpServer) {
         note: z.string().max(500).optional(),
       }),
     },
-    async ({ profile_id, weight_kg, waist_cm, body_fat_pct, date, note }, ctx) => {
-      const userId = await actingUser(ctx, profile_id);
+    async ({ profile_username, weight_kg, waist_cm, body_fat_pct, date, note }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      const userId = profile.userId;
       if (weight_kg == null && waist_cm == null && body_fat_pct == null) return fail("Cần ít nhất một chỉ số.");
       const log = await db.bodyLog.create({
         data: { userId, date: date ?? todayKey(), weightKg: weight_kg, waistCm: waist_cm, bodyFatPct: body_fat_pct, note: note?.trim() || null },
       });
-      return json({ saved_body_log_id: log.id, date: log.date });
+      return json({ profile_username: profile.profileUsername, saved_body_log_id: log.id, date: log.date });
     },
   );
 
@@ -385,16 +400,17 @@ export function registerTools(server: McpServer) {
       title: "Xóa bữa ăn",
       description:
         "Xóa vĩnh viễn một bữa ăn của người dùng theo id, kể cả ảnh đính kèm. Chỉ gọi khi người dùng yêu cầu xóa (ví dụ bữa vừa ghi nhầm); không tự ý xóa.",
-      inputSchema: z.object({ profile_id: profileIdField, id: z.string() }),
+      inputSchema: z.object({ profile_username: profileUsernameField, id: z.string() }),
       annotations: { destructiveHint: true },
     },
-    async ({ profile_id, id }, ctx) => {
-      const userId = await actingUser(ctx, profile_id);
+    async ({ profile_username, id }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      const userId = profile.userId;
       const meal = await db.meal.findFirst({ where: { id, userId }, include: { photos: true } });
       if (!meal) return fail("Không tìm thấy bữa ăn.");
       await db.$transaction([db.photo.deleteMany({ where: { mealId: id } }), db.meal.delete({ where: { id } })]);
       await Promise.all(meal.photos.map((p) => deleteImage(p.path, userId)));
-      return json({ deleted_meal_id: id, day: await dayOverview(userId, meal.date) });
+      return json({ profile_username: profile.profileUsername, deleted_meal_id: id, day: await dayOverview(userId, meal.date) });
     },
   );
 
@@ -403,15 +419,16 @@ export function registerTools(server: McpServer) {
     {
       title: "Xóa buổi tập",
       description: "Xóa vĩnh viễn một buổi tập của người dùng theo id. Chỉ gọi khi người dùng yêu cầu xóa; không tự ý xóa.",
-      inputSchema: z.object({ profile_id: profileIdField, id: z.string() }),
+      inputSchema: z.object({ profile_username: profileUsernameField, id: z.string() }),
       annotations: { destructiveHint: true },
     },
-    async ({ profile_id, id }, ctx) => {
-      const userId = await actingUser(ctx, profile_id);
+    async ({ profile_username, id }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      const userId = profile.userId;
       const w = await db.workout.findFirst({ where: { id, userId } });
       if (!w) return fail("Không tìm thấy buổi tập.");
       await db.workout.delete({ where: { id } });
-      return json({ deleted_workout_id: id, day: await dayOverview(userId, w.date) });
+      return json({ profile_username: profile.profileUsername, deleted_workout_id: id, day: await dayOverview(userId, w.date) });
     },
   );
 
@@ -421,16 +438,17 @@ export function registerTools(server: McpServer) {
       title: "Xóa lần ghi chỉ số",
       description:
         "Xóa vĩnh viễn một lần ghi cân nặng/số đo của người dùng theo id, kể cả ảnh đính kèm. Chỉ gọi khi người dùng yêu cầu xóa; không tự ý xóa.",
-      inputSchema: z.object({ profile_id: profileIdField, id: z.string() }),
+      inputSchema: z.object({ profile_username: profileUsernameField, id: z.string() }),
       annotations: { destructiveHint: true },
     },
-    async ({ profile_id, id }, ctx) => {
-      const userId = await actingUser(ctx, profile_id);
+    async ({ profile_username, id }, ctx) => {
+      const profile = await actingProfile(ctx, profile_username);
+      const userId = profile.userId;
       const log = await db.bodyLog.findFirst({ where: { id, userId }, include: { photos: true } });
       if (!log) return fail("Không tìm thấy lần ghi.");
       await db.$transaction([db.photo.deleteMany({ where: { bodyLogId: id } }), db.bodyLog.delete({ where: { id } })]);
       await Promise.all(log.photos.map((p) => deleteImage(p.path, userId)));
-      return json({ deleted_body_log_id: id });
+      return json({ profile_username: profile.profileUsername, deleted_body_log_id: id });
     },
   );
 }

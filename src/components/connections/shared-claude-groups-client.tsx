@@ -186,7 +186,7 @@ export function SharedClaudeGroupsClient({ userId, origin, groups }: { userId: s
                       </div>
                       <p className="mt-2 text-xs text-muted">
                         {group.connected ? "Claude đã được cấp quyền cho nhóm." : "Sau khi các thành viên tham gia, thêm URL này vào Claude và cấp quyền bằng tài khoản chủ nhóm."}
-                        {" "}Mỗi lần đọc/ghi, Claude cần chọn hồ sơ từ <code>list_profiles</code>.
+                        {" "}Mỗi lần đọc/ghi, Claude cần truyền đúng username (ví dụ <code>bm_demo_an</code>) từ <code>list_profiles</code>.
                       </p>
                     </div>
                     <GroupInviteCode groupId={group.id} />

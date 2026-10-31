@@ -46,14 +46,14 @@ Có hai cách dùng connector. Cách cá nhân phù hợp khi mỗi người dù
 1. Đăng nhập BodyMetrics, mở **Hồ sơ → Kết nối Claude**, rồi bấm **Mở Claude để kết nối**.
 2. Trong Claude, mở **Customize → Connectors → Add custom connector**. Đặt tên `BodyMetrics`, dán URL cá nhân `/api/mcp` đang hiện trong hồ sơ, bấm **Add**, rồi **Connect**.
 3. Đăng nhập bằng tài khoản BodyMetrics của bạn và bấm **Cho phép**.
-4. Trong chat bật connector. Claude gọi `list_profiles` trước, rồi truyền đúng `profile_id` vào mọi thao tác đọc hoặc ghi.
+4. Trong chat bật connector. Claude gọi `list_profiles` trước, rồi truyền đúng `profile_username` (username BodyMetrics) vào mọi thao tác đọc hoặc ghi.
 
 ### Nhiều hồ sơ dùng chung một tài khoản Claude
 
 1. Chủ nhóm mở **Hồ sơ → Kết nối Claude**, tạo nhóm và gửi mã mời riêng cho từng người.
 2. Mỗi người đăng nhập bằng tài khoản BodyMetrics của mình, nhập mã và bấm **Tham gia**. Khi tham gia, người đó đồng ý cho connector của nhóm đọc, ghi và xóa nhật ký trong hồ sơ của mình; xóa chỉ khi người dùng yêu cầu.
 3. Sau khi các thành viên đã tham gia, chủ nhóm sao chép URL connector của nhóm (`/api/mcp/shared/<id>`), thêm URL đó vào cùng tài khoản Claude và cấp quyền bằng tài khoản BodyMetrics chủ nhóm. Trang cấp quyền liệt kê các hồ sơ trong nhóm.
-4. Claude gọi `list_profiles` và phải chọn `profile_id` rõ ràng cho mỗi thao tác. Nếu chưa rõ hồ sơ nào, Claude cần hỏi. Khi thành viên rời nhóm hoặc bị gỡ, các lần gọi tiếp theo không còn truy cập được hồ sơ đó.
+4. Claude gọi `list_profiles`, đối chiếu username BodyMetrics (ví dụ `bm_demo_an`) và truyền đúng `profile_username` trong mỗi thao tác. Nếu người dùng không nói rõ username nào, Claude cần hỏi; không tự mặc định người nhắn trong tài khoản Claude dùng chung là chủ nhóm. Kết quả ghi cũng trả lại username đã chọn để xác nhận. Khi thành viên rời nhóm hoặc bị gỡ, các lần gọi tiếp theo không còn truy cập được hồ sơ đó.
 
 Claude nhận token truy cập 1 giờ, tự gia hạn bằng refresh token (30 ngày, đổi mới sau mỗi lần dùng). Muốn ngắt kết nối cá nhân: **Hồ sơ → Kết nối Claude → Thu hồi** (hoặc gỡ connector trên claude.ai). Chủ nhóm có thể xóa nhóm; thành viên có thể rời nhóm hoặc được chủ nhóm gỡ. Tài khoản bị khóa thì các kết nối do tài khoản đó tạo không hoạt động nữa.
 
