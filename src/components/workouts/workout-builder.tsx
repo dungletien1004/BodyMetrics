@@ -1,10 +1,12 @@
 "use client";
 
-import { Check, ChevronDown, Copy, Minus, Plus, Search, Trash2, X } from "lucide-react";
+import { Camera, Check, ChevronDown, Copy, ImagePlus, Loader2, Minus, Plus, Search, Sparkles, Trash2, TriangleAlert, X } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { saveWorkout, weightForDay } from "@/app/(app)/workouts/actions";
+import { analyzeWorkoutImage, saveWorkout, weightForDay } from "@/app/(app)/workouts/actions";
 import { Badge, Button, Card, CardTitle, Field, cn } from "@/components/ui";
 import { exerciseKcal, INTENSITY_LABEL, type Intensity } from "@/lib/calc";
+import { downscaleImage } from "@/lib/client-image";
 import { formatDayLong, formatDayShort, isDayKey } from "@/lib/dates";
 import { kcal, num, parseNum } from "@/lib/format";
 import {
@@ -105,12 +107,14 @@ export function WorkoutBuilder({
   initial,
   initialWeightKg,
   workoutId = null,
+  aiEnabled,
 }: {
   exercises: ExerciseOption[];
   habits: ExerciseHabit[];
   initial: WorkoutPayload;
   initialWeightKg: number;
   workoutId?: string | null;
+  aiEnabled: boolean;
 }) {
   const byId = useMemo(() => new Map(exercises.map((e) => [e.id, e])), [exercises]);
   const habitById = useMemo(() => new Map(habits.map((h) => [h.exerciseId, h])), [habits]);
@@ -124,9 +128,18 @@ export function WorkoutBuilder({
   const [weight, setWeight] = useState(initialWeightKg);
   const [pickerOpen, setPickerOpen] = useState(initial.entries.length === 0);
   const [error, setError] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisNotice, setAnalysisNotice] = useState<string | null>(null);
+  const [analysisApplied, setAnalysisApplied] = useState(false);
   const [saving, startSaving] = useTransition();
   // A ref, not state: two taps in the same frame both see busy=false in a state value.
   const lock = useRef(false);
+  const analyzeLock = useRef(false);
+  const analysisEntryKeys = useRef<string[]>([]);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const libraryRef = useRef<HTMLInputElement>(null);
   const [locked, setLocked] = useState(false);
   const scrollTo = useRef<string | null>(null);
 
@@ -135,6 +148,8 @@ export function WorkoutBuilder({
     document.getElementById(`entry-${scrollTo.current}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
     scrollTo.current = null;
   }, [entries]);
+
+  useEffect(() => () => void (imagePreview && URL.revokeObjectURL(imagePreview)), [imagePreview]);
 
   const entryKcal = (e: EntryRow) => {
     const ex = byId.get(e.exerciseId);
@@ -166,6 +181,70 @@ export function WorkoutBuilder({
     setEntries((list) => [...list, entry]);
     setPickerOpen(false);
     setError(null);
+  }
+
+  async function pickImage(file: File | undefined) {
+    if (!file) return;
+    const downsized = await downscaleImage(file);
+    setImageFile(downsized);
+    setImagePreview(URL.createObjectURL(downsized));
+    setAnalysisNotice(null);
+    setError(null);
+  }
+
+  async function analyzeImage() {
+    if (!imageFile || analyzeLock.current) return;
+    analyzeLock.current = true;
+    setAnalyzing(true);
+    setAnalysisNotice(null);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.set("photo", imageFile);
+      const result = await analyzeWorkoutImage(form);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+
+      const suggested = result.entries.flatMap((item): EntryRow[] => {
+        if (!byId.has(item.exerciseId)) return [];
+        return [{
+          key: uid(),
+          exerciseId: item.exerciseId,
+          minutes: str(item.minutes),
+          minutesAuto: false,
+          intensity: item.intensity,
+          distance: str(item.distanceKm),
+          sets: item.sets.map((set) => newSet(str(set.reps), str(set.weightKg))),
+        }];
+      });
+      if (!suggested.length) {
+        setError("Không có bài tập nào khớp với thư viện. Hãy chọn bài và nhập số liệu thủ công.");
+        return;
+      }
+
+      const previousAnalysis = new Set(analysisEntryKeys.current);
+      setEntries((current) => [...current.filter((entry) => !previousAnalysis.has(entry.key)), ...suggested]);
+      analysisEntryKeys.current = suggested.map((entry) => entry.key);
+      setAnalysisApplied(true);
+      setPickerOpen(false);
+      setAnalysisNotice(
+        [
+          `Đã điền ${suggested.length} bài tập vào biểu mẫu. Hãy kiểm tra lại trước khi lưu.`,
+          result.notes,
+          result.unmatchedExerciseNames.length ? `Không khớp thư viện: ${result.unmatchedExerciseNames.join(", ")}.` : null,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+    } catch (err) {
+      console.error("analyzeWorkoutImage failed", err);
+      setError("Không gửi được ảnh. Hãy thử ảnh nhỏ hơn hoặc nhập bài tập bằng tay.");
+    } finally {
+      analyzeLock.current = false;
+      setAnalyzing(false);
+    }
   }
 
   function changeDate(v: string) {
@@ -229,6 +308,71 @@ export function WorkoutBuilder({
         if (ev.key === "Enter" && ev.target instanceof HTMLInputElement) ev.preventDefault();
       }}
     >
+      <Card>
+        <CardTitle>Phân tích ảnh buổi tập</CardTitle>
+        {aiEnabled ? (
+          <>
+            <input
+              ref={cameraRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(event) => {
+                void pickImage(event.target.files?.[0]);
+                event.currentTarget.value = "";
+              }}
+            />
+            <input
+              ref={libraryRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => {
+                void pickImage(event.target.files?.[0]);
+                event.currentTarget.value = "";
+              }}
+            />
+            <p className="mb-3 text-sm text-muted">
+              Chọn ảnh màn hình máy tập, đồng hồ hoặc ghi chú số set. AI sẽ điền gợi ý vào biểu mẫu để bạn kiểm tra trước khi lưu.
+            </p>
+            {imagePreview && (
+              <div className="mb-3 overflow-hidden rounded-xl bg-surface-2">
+                {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
+                <img src={imagePreview} alt="Ảnh buổi tập" className="mx-auto max-h-72 max-w-full object-contain" />
+              </div>
+            )}
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button type="button" variant={imagePreview ? "secondary" : "primary"} onClick={() => cameraRef.current?.click()} disabled={analyzing || busy} className="w-full sm:w-auto">
+                <Camera className="size-4" /> {imagePreview ? "Chụp lại" : "Chụp ảnh"}
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => libraryRef.current?.click()} disabled={analyzing || busy} className="w-full sm:w-auto">
+                <ImagePlus className="size-4" /> Chọn ảnh
+              </Button>
+            </div>
+            {imageFile && (
+              <Button type="button" onClick={analyzeImage} disabled={analyzing || busy} className="mt-3 w-full sm:w-auto">
+                {analyzing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                {analyzing ? "Đang phân tích…" : analysisApplied ? "Phân tích lại bằng AI" : "Phân tích bằng AI"}
+              </Button>
+            )}
+            {analysisApplied && <p className="mt-2 text-xs text-muted">Phân tích lại sẽ thay các gợi ý AI vừa điền.</p>}
+          </>
+        ) : (
+          <p className="flex gap-2 rounded-xl bg-surface-2 p-3 text-sm text-muted">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-accent" />
+            <span>
+              Phân tích ảnh trong ứng dụng chưa được bật. Bạn có thể bật connector BodyMetrics trong Claude, gửi ảnh và nhờ Claude ghi buổi tập. Xem hướng dẫn tại{" "}
+              <Link href="/profile#ket-noi-claude" className="font-medium text-accent underline-offset-2 hover:underline">
+                Hồ sơ
+              </Link>
+              .
+            </span>
+          </p>
+        )}
+        {analysisNotice && <p role="status" className="mt-3 rounded-xl bg-accent/10 p-3 text-sm text-accent">{analysisNotice}</p>}
+      </Card>
+
       {entries.map((e, i) => {
         const ex = byId.get(e.exerciseId);
         if (!ex) return null;
