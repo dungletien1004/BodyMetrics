@@ -1,19 +1,34 @@
 "use client";
 
-import { Camera, ImagePlus, Loader2, Plus, Sparkles, Trash2, TriangleAlert } from "lucide-react";
+import { Camera, History, ImagePlus, Loader2, PenLine, Plus, Repeat, Search, Sparkles, Trash2, TriangleAlert, X } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { analyzePhoto, createMeal, discardPhoto, updateMeal } from "@/app/(app)/meals/actions";
 import { Badge, Button, Card, CardTitle, cn, Field, Input, Textarea } from "@/components/ui";
 import { downscaleImage } from "@/lib/client-image";
+import {
+  findFoodByName,
+  FOOD_CATEGORY_LABEL,
+  isZeroKcalName,
+  matchPortion,
+  normalize,
+  nutritionFor,
+  rankByName,
+  searchFoods,
+  type Food,
+  type FoodPortion,
+} from "@/lib/foods";
 import { kcal as fmtKcal, num, parseNum } from "@/lib/format";
 import {
   LOW_CONFIDENCE,
   MEAL_TYPES,
+  mealTypeLabel,
   type MealInput,
   type MealItemInput,
   type MealType,
+  type PreviousMeal,
   type RecentFood,
 } from "./types";
 
@@ -32,16 +47,21 @@ interface Row {
   confidence: number | null;
   // Values that portion changes scale from; reset whenever a macro is typed by hand.
   base: Record<NumKey, number> | null;
+  // Named portions ("1 tô", "1 ổ"…) when the name is a food from the database; portionIdx -1 = custom grams.
+  portions: FoodPortion[] | null;
+  portionIdx: number;
+  qty: string;
 }
 
 let rowSeq = 0;
 const str = (n: number | null | undefined) => (n == null ? "" : String(Math.round(n * 10) / 10));
 const val = (s: string) => parseNum(s) ?? 0;
 
-function toRow(i: MealItemInput): Row {
-  // A brand-new blank row starts with empty fields rather than zeros, so typing doesn't append to "0".
-  const blank = !i.name && !i.kcal;
+// A new row without values starts with empty fields rather than zeros, so typing doesn't append to "0".
+function toRow(i: MealItemInput, blank = !i.name && !i.kcal): Row {
   const s = (n: number | null) => (blank ? "" : str(n));
+  const food = i.name ? findFoodByName(i.name) : undefined;
+  const match = food ? matchPortion(food.portions, i.portionG) : null;
   return {
     key: `r${++rowSeq}`,
     name: i.name,
@@ -53,15 +73,38 @@ function toRow(i: MealItemInput): Row {
     source: i.source,
     confidence: i.confidence,
     base: i.portionG ? { portionG: i.portionG, kcal: i.kcal, proteinG: i.proteinG, carbG: i.carbG, fatG: i.fatG } : null,
+    portions: food?.portions ?? null,
+    portionIdx: match?.idx ?? -1,
+    qty: str(match?.qty ?? 1),
   };
 }
 
 const emptyItem: MealItemInput = { name: "", portionG: null, kcal: 0, proteinG: 0, carbG: 0, fatG: 0, source: "manual", confidence: null };
 
+/** A database food at its default portion. */
+function foodItem(food: Food): MealItemInput {
+  const grams = food.portions[0].g;
+  return { name: food.name, portionG: grams, ...nutritionFor(food, grams), source: "manual", confidence: null };
+}
+
 function snapshot(r: Row): Row["base"] {
   const p = parseNum(r.portionG);
   return p && p > 0 ? { portionG: p, kcal: val(r.kcal), proteinG: val(r.proteinG), carbG: val(r.carbG), fatG: val(r.fatG) } : null;
 }
+
+/** Set the grams and rescale the macros from the row's base. */
+function scaleTo(r: Row, grams: number, typed = str(grams)): Row {
+  const next = { ...r, portionG: typed };
+  if (r.base && grams > 0) {
+    const k = grams / r.base.portionG;
+    for (const m of MACROS) next[m] = str(r.base[m] * k);
+  }
+  return next;
+}
+
+const portionText = (p: FoodPortion) => (p.label === "100 g" ? p.label : `${p.label} · ${num(p.g, 0)} g`);
+
+type SearchResult = { kind: "food"; food: Food; score: number } | { kind: "recent"; food: RecentFood; score: number };
 
 export interface MealEditorProps {
   mode: "new" | "edit";
@@ -70,11 +113,13 @@ export interface MealEditorProps {
   existingPhotos?: { id: string; url: string }[];
   recentFoods: RecentFood[];
   aiEnabled: boolean;
+  /** The previous day's meals per type, offered as "Lặp lại bữa … hôm qua" (new meals only). */
+  previousDay?: Partial<Record<MealType, PreviousMeal>>;
 }
 
-export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentFoods, aiEnabled }: MealEditorProps) {
+export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentFoods, aiEnabled, previousDay }: MealEditorProps) {
   const router = useRouter();
-  const [rows, setRows] = useState<Row[]>(() => (initial.items.length ? initial.items : [emptyItem]).map(toRow));
+  const [rows, setRows] = useState<Row[]>(() => initial.items.map((i) => toRow(i)));
   const [date, setDate] = useState(initial.date);
   const [type, setType] = useState<MealType>(initial.type);
   const [time, setTime] = useState(initial.time);
@@ -91,7 +136,13 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
 
   const [error, setError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
+  // A ref, not state: two taps in the same frame both see `saving === false`.
+  const savingRef = useRef(false);
+  const analyzingRef = useRef(false);
+  // Row keys of items without kcal, waiting for "vẫn lưu?" confirmation.
+  const [zeroAsk, setZeroAsk] = useState<string[] | null>(null);
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
 
@@ -106,10 +157,25 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
     [rows],
   );
 
-  const recent = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (q ? recentFoods.filter((f) => f.name.toLowerCase().includes(q)) : recentFoods).slice(0, 12);
+  // The user's own recent foods (their real portions) come first when they match as well as a database food.
+  const results = useMemo((): SearchResult[] => {
+    if (!query.trim()) return [];
+    const recent = rankByName(recentFoods, query, (f) => f.name)
+      .slice(0, 3)
+      .map((s): SearchResult => ({ kind: "recent", food: s.item, score: s.score + 5 }));
+    const recentNames = new Set(recent.map((r) => normalize(r.food.name)));
+    const foods = searchFoods(query, 8)
+      .filter((s) => !recentNames.has(normalize(s.item.name)))
+      .map((s): SearchResult => ({ kind: "food", food: s.item, score: s.score }));
+    return [...recent, ...foods].sort((a, b) => b.score - a.score).slice(0, 8);
   }, [query, recentFoods]);
+
+  const previous = mode === "new" ? previousDay?.[type] : undefined;
+
+  function editRows(fn: (prev: Row[]) => Row[]) {
+    setZeroAsk(null);
+    setRows(fn);
+  }
 
   async function pickFile(picked: File | undefined) {
     if (!picked) return;
@@ -126,7 +192,8 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
   }
 
   async function runAnalysis() {
-    if (!file) return;
+    if (!file || analyzingRef.current) return;
+    analyzingRef.current = true;
     setAnalyzing(true);
     setError(null);
     setWarning(null);
@@ -146,34 +213,42 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
       setAiRaw(res.aiRaw);
       setAiNotes(res.notes);
       setWarning(res.warning);
-      setRows((prev) => {
-        const kept = prev.filter((r) => r.source === "manual" && r.name.trim());
-        const next = [...res.items.map(toRow), ...kept];
-        return next.length ? next : [toRow(emptyItem)];
-      });
+      editRows((prev) => [...res.items.map((i) => toRow(i)), ...prev.filter((r) => r.source === "manual" && r.name.trim())]);
     } catch (err) {
       console.error(err);
       setError("Không gửi được ảnh. Ảnh có thể quá lớn (tối đa 20 MB) hoặc máy chủ không phản hồi.");
     } finally {
+      analyzingRef.current = false;
       setAnalyzing(false);
     }
   }
 
   function updateRow(key: string, field: keyof Row, value: string) {
-    setRows((prev) =>
+    editRows((prev) =>
       prev.map((r) => {
         if (r.key !== key) return r;
-        const next = { ...r, [field]: value };
         if (field === "portionG") {
           const p = parseNum(value);
-          if (r.base && p != null && p > 0) {
-            const k = p / r.base.portionG;
-            for (const m of MACROS) next[m] = str(r.base[m] * k);
-          }
-        } else if (MACROS.includes(field as NumKey)) {
-          next.base = snapshot(next);
+          const next = p != null && p > 0 ? scaleTo(r, p, value) : { ...r, portionG: value };
+          const match = r.portions ? matchPortion(r.portions, p) : null;
+          return { ...next, portionIdx: match?.idx ?? -1, qty: match ? str(match.qty) : r.qty };
         }
+        const next = { ...r, [field]: value };
+        if (MACROS.includes(field as NumKey)) next.base = snapshot(next);
         return next;
+      }),
+    );
+  }
+
+  /** Pick a named portion (idx >= 0) or a quantity of it; -1 switches to custom grams. */
+  function setPortion(key: string, idx: number, qty: string) {
+    editRows((prev) =>
+      prev.map((r) => {
+        if (r.key !== key || !r.portions) return r;
+        const next = { ...r, portionIdx: idx, qty };
+        const q = parseNum(qty);
+        if (idx < 0 || q == null || q <= 0) return next;
+        return scaleTo(next, r.portions[idx].g * q);
       }),
     );
   }
@@ -181,35 +256,43 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
   // Grams typed after the macros become the scaling base once the field is left, so the
   // next portion change rescales. Done on blur, not per keystroke, so "2" -> "20" -> "200" doesn't scale.
   function lockBase(key: string) {
-    setRows((prev) => prev.map((r) => (r.key === key && !r.base ? { ...r, base: snapshot(r) } : r)));
+    editRows((prev) => prev.map((r) => (r.key === key && !r.base ? { ...r, base: snapshot(r) } : r)));
   }
 
-  function addRow(item: MealItemInput = emptyItem) {
-    setRows((prev) => {
-      // Fill a blank first row instead of leaving it dangling.
-      const blank = prev.length === 1 && !prev[0].name.trim() && !val(prev[0].kcal);
-      return [...(blank ? [] : prev), toRow(item)];
-    });
+  function addRows(newRows: Row[]) {
+    // Fill a blank row instead of leaving it dangling.
+    editRows((prev) => [...prev.filter((r) => r.name.trim() || r.kcal.trim()), ...newRows]);
+  }
+
+  function pickResult(r: SearchResult) {
+    addRows([toRow(r.kind === "food" ? foodItem(r.food) : { ...r.food, source: "manual", confidence: null })]);
+    setQuery("");
+    searchRef.current?.focus();
+  }
+
+  function addManual(name = "") {
+    addRows([toRow({ ...emptyItem, name }, true)]);
+    setQuery("");
   }
 
   function removeRow(key: string) {
-    setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.key !== key) : [toRow(emptyItem)]));
+    editRows((prev) => prev.filter((r) => r.key !== key));
   }
 
-  function save() {
+  function save(confirmedZero = false) {
+    if (savingRef.current) return;
     setError(null);
-    const items: MealItemInput[] = rows
-      .filter((r) => r.name.trim() || val(r.kcal))
-      .map((r) => ({
-        name: r.name.trim() || "Món không tên",
-        portionG: parseNum(r.portionG),
-        kcal: val(r.kcal),
-        proteinG: val(r.proteinG),
-        carbG: val(r.carbG),
-        fatG: val(r.fatG),
-        source: r.source,
-        confidence: r.confidence,
-      }));
+    const filled = rows.filter((r) => r.name.trim() || val(r.kcal));
+    const items: MealItemInput[] = filled.map((r) => ({
+      name: r.name.trim() || "Món không tên",
+      portionG: parseNum(r.portionG),
+      kcal: val(r.kcal),
+      proteinG: val(r.proteinG),
+      carbG: val(r.carbG),
+      fatG: val(r.fatG),
+      source: r.source,
+      confidence: r.confidence,
+    }));
     if (!items.length) {
       setError("Thêm ít nhất một món ăn.");
       return;
@@ -218,30 +301,41 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
       setError("Số liệu không được âm.");
       return;
     }
+    if (!confirmedZero) {
+      const missing = filled.filter((r) => !(val(r.kcal) > 0) && !isZeroKcalName(r.name)).map((r) => r.key);
+      if (missing.length) {
+        setZeroAsk(missing);
+        return;
+      }
+    }
+    setZeroAsk(null);
+    savingRef.current = true;
     startSaving(async () => {
-      // A photo that was picked but never sent for analysis is uploaded now rather than dropped.
-      let photoId = photo?.id ?? null;
-      if (file && !photo) {
-        const fd = new FormData();
-        fd.set("photo", file);
-        fd.set("date", date);
-        fd.set("skipAi", "1");
-        try {
+      // On success the action redirects and the lock stays held until the page goes away.
+      const fail = (msg: string) => {
+        setError(msg);
+        savingRef.current = false;
+      };
+      try {
+        // A photo that was picked but never sent for analysis is uploaded now rather than dropped.
+        let photoId = photo?.id ?? null;
+        if (file && !photo) {
+          const fd = new FormData();
+          fd.set("photo", file);
+          fd.set("date", date);
+          fd.set("skipAi", "1");
           const up = await analyzePhoto(fd);
-          if (!up.ok) {
-            setError(up.error);
-            return;
-          }
+          if (!up.ok) return fail(up.error);
           photoId = up.photoId;
           setPhoto({ id: up.photoId, url: up.photoUrl });
-        } catch {
-          setError("Không gửi được ảnh. Ảnh có thể quá lớn (tối đa 20 MB) hoặc máy chủ không phản hồi.");
-          return;
         }
+        const input: MealInput = { date, type, time, note, items, photoId, aiRaw };
+        const res = mode === "edit" && mealId ? await updateMeal(mealId, input) : await createMeal(input);
+        if (res?.error) fail(res.error);
+      } catch (err) {
+        console.error(err);
+        fail("Không lưu được. Kiểm tra kết nối mạng rồi thử lại.");
       }
-      const input: MealInput = { date, type, time, note, items, photoId, aiRaw };
-      const res = mode === "edit" && mealId ? await updateMeal(mealId, input) : await createMeal(input);
-      if (res?.error) setError(res.error);
     });
   }
 
@@ -251,64 +345,79 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
   }
 
   const busy = analyzing || saving;
+  const zeroNames = zeroAsk ? rows.filter((r) => zeroAsk.includes(r.key)).map((r) => r.name.trim() || "không tên") : [];
+
+  const photoCard =
+    mode === "new" ? (
+      <Card>
+        <CardTitle>{aiEnabled ? "Ảnh món ăn" : "Ảnh món ăn (không bắt buộc)"}</CardTitle>
+        <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => void pickFile(e.target.files?.[0])} />
+        <input ref={libraryRef} type="file" accept="image/*" className="hidden" onChange={(e) => void pickFile(e.target.files?.[0])} />
+
+        {preview ? (
+          <div className="relative mb-3 overflow-hidden rounded-xl bg-surface-2">
+            {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
+            <img src={preview} alt="Ảnh món ăn" className="mx-auto max-h-80 w-auto object-contain" />
+            {analyzing && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 text-sm text-white">
+                <Loader2 className="size-6 animate-spin" /> Đang phân tích…
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="mb-3 text-sm text-muted">
+            {aiEnabled
+              ? "Chụp hoặc chọn ảnh bữa ăn, AI sẽ ước lượng món, khẩu phần và calo. Có thể bỏ qua và tìm món bên dưới."
+              : "Ảnh được lưu cùng bữa ăn để xem lại sau."}
+          </p>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant={preview || !aiEnabled ? "secondary" : "primary"} onClick={() => cameraRef.current?.click()} disabled={busy}>
+            <Camera className="size-4" /> {preview ? "Chụp lại" : "Chụp ảnh"}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => libraryRef.current?.click()} disabled={busy}>
+            <ImagePlus className="size-4" /> Chọn ảnh
+          </Button>
+        </div>
+
+        {file && aiEnabled && (
+          <div className="mt-3 space-y-3">
+            <Field label="Mô tả thêm (không bắt buộc)" hint="Giúp AI đoán đúng hơn: tên món, lượng đã ăn, cách nấu.">
+              <Input value={hint} onChange={(e) => setHint(e.target.value)} placeholder="VD: cơm tấm sườn, ít cơm" maxLength={300} />
+            </Field>
+            <Button type="button" onClick={runAnalysis} disabled={busy} className="w-full sm:w-auto">
+              {analyzing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              {photo ? "Phân tích lại" : "Phân tích"}
+            </Button>
+          </div>
+        )}
+        {!aiEnabled && (
+          <p className="mt-3 flex gap-2 rounded-xl bg-surface-2 p-3 text-xs text-muted">
+            <Sparkles className="mt-0.5 size-3.5 shrink-0 text-accent" />
+            <span>
+              Muốn ghi bữa ăn bằng ảnh? Gửi ảnh cho Claude sau khi{" "}
+              <Link href="/profile#ket-noi-claude" className="font-medium text-accent underline-offset-2 hover:underline">
+                kết nối Claude
+              </Link>{" "}
+              - Claude ước lượng món, calo và ghi vào đây giúp bạn.
+            </span>
+          </p>
+        )}
+      </Card>
+    ) : (
+      existingPhotos.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto">
+          {existingPhotos.map((p) => (
+            <Image key={p.id} src={p.url} alt="Ảnh bữa ăn" width={320} height={240} unoptimized className="h-48 w-auto rounded-xl object-cover" />
+          ))}
+        </div>
+      )
+    );
 
   return (
     <div className="space-y-4">
-      {mode === "new" ? (
-        <Card>
-          <CardTitle>Ảnh món ăn</CardTitle>
-          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => void pickFile(e.target.files?.[0])} />
-          <input ref={libraryRef} type="file" accept="image/*" className="hidden" onChange={(e) => void pickFile(e.target.files?.[0])} />
-
-          {preview ? (
-            <div className="relative mb-3 overflow-hidden rounded-xl bg-surface-2">
-              {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
-              <img src={preview} alt="Ảnh món ăn" className="mx-auto max-h-80 w-auto object-contain" />
-              {analyzing && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 text-sm text-white">
-                  <Loader2 className="size-6 animate-spin" /> Đang phân tích…
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="mb-3 text-sm text-muted">
-              Chụp hoặc chọn ảnh bữa ăn{aiEnabled ? ", AI sẽ ước lượng món, khẩu phần và calo." : "."} Có thể bỏ qua và nhập tay bên dưới.
-            </p>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant={preview ? "secondary" : "primary"} onClick={() => cameraRef.current?.click()} disabled={busy}>
-              <Camera className="size-4" /> {preview ? "Chụp lại" : "Chụp ảnh"}
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => libraryRef.current?.click()} disabled={busy}>
-              <ImagePlus className="size-4" /> Chọn ảnh
-            </Button>
-          </div>
-
-          {file && (
-            <div className="mt-3 space-y-3">
-              <Field label="Mô tả thêm (không bắt buộc)" hint="Giúp AI đoán đúng hơn: tên món, lượng đã ăn, cách nấu.">
-                <Input value={hint} onChange={(e) => setHint(e.target.value)} placeholder="VD: cơm tấm sườn, ít cơm" maxLength={300} />
-              </Field>
-              {(aiEnabled || !photo) && (
-                <Button type="button" onClick={runAnalysis} disabled={busy} className="w-full sm:w-auto">
-                  {analyzing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                  {aiEnabled ? (photo ? "Phân tích lại" : "Phân tích") : "Tải ảnh lên"}
-                </Button>
-              )}
-              {!aiEnabled && !photo && <p className="text-xs text-muted">Chưa có ANTHROPIC_API_KEY: ảnh chỉ được lưu, bạn nhập món bằng tay.</p>}
-            </div>
-          )}
-        </Card>
-      ) : (
-        existingPhotos.length > 0 && (
-          <div className="flex gap-2 overflow-x-auto">
-            {existingPhotos.map((p) => (
-              <Image key={p.id} src={p.url} alt="Ảnh bữa ăn" width={320} height={240} unoptimized className="h-48 w-auto rounded-xl object-cover" />
-            ))}
-          </div>
-        )
-      )}
+      {aiEnabled && photoCard}
 
       {warning && (
         <div className="flex gap-2 rounded-xl border border-intake/40 bg-intake/10 p-3 text-sm">
@@ -322,59 +431,205 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
 
         {aiNotes && <p className="mb-3 whitespace-pre-line rounded-xl bg-surface-2 p-3 text-xs text-muted">{aiNotes}</p>}
 
-        <div className="mb-1 hidden gap-2 px-1 text-xs text-muted md:flex">
-          <span className="flex-1">Tên món</span>
-          <span className="grid w-[26rem] grid-cols-5 gap-2 text-right">
-            <span>Gram</span>
-            <span>Kcal</span>
-            <span>Đạm</span>
-            <span>Tinh bột</span>
-            <span>Béo</span>
-          </span>
-          <span className="w-9" />
+        {previous && (
+          <button
+            type="button"
+            onClick={() => addRows(previous.items.map((i) => toRow(i)))}
+            className="mb-3 flex w-full items-center gap-3 rounded-xl border border-dashed border-accent/50 bg-accent/5 p-3 text-left text-sm hover:bg-accent/10"
+          >
+            <Repeat className="size-4 shrink-0 text-accent" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium text-accent">Lặp lại bữa {mealTypeLabel(type).toLowerCase()} hôm qua</span>
+              <span className="block truncate text-xs text-muted">{previous.items.map((i) => i.name).join(", ")}</span>
+            </span>
+            <span className="shrink-0 text-xs font-medium tabular-nums text-muted">{fmtKcal(previous.kcal)} kcal</span>
+          </button>
+        )}
+
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
+          {/* Not <Input>: cn() has no tailwind-merge, so its px-3 would fight the icon padding. */}
+          <input
+            ref={searchRef}
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (results[0]) pickResult(results[0]);
+              }
+            }}
+            placeholder="Tìm món: phở, cơm tấm, trà sữa…"
+            aria-label="Tìm món ăn"
+            autoComplete="off"
+            enterKeyHint="done"
+            className="w-full rounded-xl border border-border bg-surface py-2.5 pr-9 pl-9 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Xóa tìm kiếm"
+              className="absolute top-1/2 right-2 -translate-y-1/2 rounded-lg p-1 text-muted hover:text-foreground"
+            >
+              <X className="size-4" />
+            </button>
+          )}
         </div>
 
-        <ul className="space-y-2">
-          {rows.map((r) => {
-            const low = r.source === "ai" && r.confidence != null && r.confidence < LOW_CONFIDENCE;
-            return (
-              <li
-                key={r.key}
-                className={cn(
-                  "flex flex-col gap-2 rounded-xl border p-2 md:flex-row md:items-center md:border-transparent md:p-1",
-                  low ? "border-intake/50 bg-intake/5 md:border-intake/50" : "border-border",
-                )}
-              >
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <Input value={r.name} onChange={(e) => updateRow(r.key, "name", e.target.value)} placeholder="Tên món" aria-label="Tên món" />
-                  {r.source === "ai" && r.confidence != null && (
-                    <Badge className={cn("shrink-0", low && "bg-intake/15 text-intake")}>
-                      {low ? "Chưa chắc " : "AI "}
-                      {Math.round(r.confidence * 100)}%
-                    </Badge>
+        {query.trim() ? (
+          <ul className="mt-2 divide-y divide-border overflow-hidden rounded-xl border border-border" aria-label="Kết quả tìm món">
+            {results.map((r) => {
+              const grams = r.kind === "food" ? r.food.portions[0].g : r.food.portionG;
+              const kcalValue = r.kind === "food" ? nutritionFor(r.food, grams ?? 100).kcal : r.food.kcal;
+              return (
+                <li key={`${r.kind}:${r.food.name}`}>
+                  <button type="button" onClick={() => pickResult(r)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-2">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{r.food.name}</span>
+                      <span className="block truncate text-xs text-muted">
+                        {r.kind === "food" ? (
+                          <>
+                            {portionText(r.food.portions[0])} · {FOOD_CATEGORY_LABEL[r.food.category]}
+                          </>
+                        ) : (
+                          <>
+                            <History className="mr-1 inline size-3 align-[-2px]" />
+                            Lần trước{grams ? ` · ${num(grams, 0)} g` : ""}
+                          </>
+                        )}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-sm font-semibold tabular-nums text-intake">{fmtKcal(kcalValue)}</span>
+                    <Plus className="size-4 shrink-0 text-accent" />
+                  </button>
+                </li>
+              );
+            })}
+            <li>
+              <button type="button" onClick={() => addManual(query.trim())} className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-muted hover:bg-surface-2">
+                <PenLine className="size-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">
+                  {results.length ? "Không thấy? " : "Không tìm thấy. "}Nhập tay “{query.trim()}”
+                </span>
+              </button>
+            </li>
+          </ul>
+        ) : (
+          recentFoods.length > 0 && (
+            <div className="mt-2">
+              <span className="mb-1.5 block text-xs text-muted">Hay ăn gần đây</span>
+              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+                {recentFoods.slice(0, 12).map((f) => (
+                  <button
+                    key={f.name}
+                    type="button"
+                    onClick={() => addRows([toRow({ ...f, source: "manual", confidence: null })])}
+                    className="shrink-0 rounded-full border border-border px-3 py-1 text-xs hover:border-accent hover:text-accent"
+                  >
+                    {f.name} <span className="text-muted">· {fmtKcal(f.kcal)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        )}
+
+        {rows.length > 0 && (
+          <div className="mt-4 mb-1 hidden gap-2 px-1 text-xs text-muted md:flex">
+            <span className="flex-1">Tên món</span>
+            <span className="grid w-[26rem] grid-cols-5 gap-2 text-right">
+              <span>Gram</span>
+              <span>Kcal</span>
+              <span>Đạm</span>
+              <span>Tinh bột</span>
+              <span>Béo</span>
+            </span>
+            <span className="w-9" />
+          </div>
+        )}
+
+        {rows.length === 0 ? (
+          <p className="mt-4 rounded-xl border border-dashed border-border p-4 text-center text-sm text-muted">
+            Chưa có món nào. Tìm món ở trên, hoặc nhập tay nếu không có trong danh sách.
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2 md:mt-0">
+            {rows.map((r) => {
+              const low = r.source === "ai" && r.confidence != null && r.confidence < LOW_CONFIDENCE;
+              const noKcal = zeroAsk?.includes(r.key);
+              return (
+                <li
+                  key={r.key}
+                  className={cn(
+                    "flex flex-col gap-2 rounded-xl border p-2 md:flex-row md:items-start md:border-transparent md:p-1",
+                    noKcal ? "border-danger/60 bg-danger/5 md:border-danger/60" : low ? "border-intake/50 bg-intake/5 md:border-intake/50" : "border-border",
                   )}
-                  <button type="button" onClick={() => removeRow(r.key)} aria-label="Xóa món" className="rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-danger md:hidden">
+                >
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Input value={r.name} onChange={(e) => updateRow(r.key, "name", e.target.value)} placeholder="Tên món" aria-label="Tên món" />
+                      {r.source === "ai" && r.confidence != null && (
+                        <Badge className={cn("shrink-0", low && "bg-intake/15 text-intake")}>
+                          {low ? "Chưa chắc " : "AI "}
+                          {Math.round(r.confidence * 100)}%
+                        </Badge>
+                      )}
+                      <button type="button" onClick={() => removeRow(r.key)} aria-label="Xóa món" className="rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-danger md:hidden">
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+                    {r.portions && (
+                      <div className="flex items-center gap-1.5">
+                        {r.portionIdx >= 0 && (
+                          <>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={r.qty}
+                              onChange={(e) => setPortion(r.key, r.portionIdx, e.target.value)}
+                              aria-label="Số phần"
+                              className="w-12 shrink-0 rounded-xl border border-border bg-surface px-1.5 py-1.5 text-center text-sm tabular-nums outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            />
+                            <span className="text-xs text-muted">×</span>
+                          </>
+                        )}
+                        <select
+                          value={r.portionIdx}
+                          onChange={(e) => setPortion(r.key, Number(e.target.value), r.portionIdx >= 0 ? r.qty : "1")}
+                          aria-label="Khẩu phần"
+                          className="min-w-0 flex-1 rounded-xl border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                        >
+                          {r.portions.map((p, idx) => (
+                            <option key={p.label} value={idx}>
+                              {portionText(p)}
+                            </option>
+                          ))}
+                          <option value={-1}>Tự nhập số gram</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5 md:w-[26rem] md:gap-2">
+                    <NumInput label="Gram" value={r.portionG} onChange={(v) => updateRow(r.key, "portionG", v)} onBlur={() => lockBase(r.key)} />
+                    <NumInput label="Kcal" value={r.kcal} onChange={(v) => updateRow(r.key, "kcal", v)} invalid={noKcal} />
+                    <NumInput label="Đạm" value={r.proteinG} onChange={(v) => updateRow(r.key, "proteinG", v)} />
+                    <NumInput label="T.bột" value={r.carbG} onChange={(v) => updateRow(r.key, "carbG", v)} />
+                    <NumInput label="Béo" value={r.fatG} onChange={(v) => updateRow(r.key, "fatG", v)} />
+                  </div>
+                  <button type="button" onClick={() => removeRow(r.key)} aria-label="Xóa món" className="hidden rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-danger md:block">
                     <Trash2 className="size-4" />
                   </button>
-                </div>
-                <div className="grid grid-cols-5 gap-1.5 md:w-[26rem] md:gap-2">
-                  <NumInput label="Gram" value={r.portionG} onChange={(v) => updateRow(r.key, "portionG", v)} onBlur={() => lockBase(r.key)} />
-                  <NumInput label="Kcal" value={r.kcal} onChange={(v) => updateRow(r.key, "kcal", v)} />
-                  <NumInput label="Đạm" value={r.proteinG} onChange={(v) => updateRow(r.key, "proteinG", v)} />
-                  <NumInput label="T.bột" value={r.carbG} onChange={(v) => updateRow(r.key, "carbG", v)} />
-                  <NumInput label="Béo" value={r.fatG} onChange={(v) => updateRow(r.key, "fatG", v)} />
-                </div>
-                <button type="button" onClick={() => removeRow(r.key)} aria-label="Xóa món" className="hidden rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-danger md:block">
-                  <Trash2 className="size-4" />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <Button type="button" variant="secondary" onClick={() => addRow()}>
-            <Plus className="size-4" /> Thêm món
+          <Button type="button" variant="secondary" onClick={() => addManual()}>
+            <PenLine className="size-4" /> Nhập tay
           </Button>
           <div className="flex gap-3 text-xs tabular-nums text-muted">
             <span>
@@ -391,30 +646,10 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
             </span>
           </div>
         </div>
-        <p className="mt-2 text-xs text-muted">Đổi số gram sẽ tự tính lại calo và chất theo tỉ lệ.</p>
-
-        {recentFoods.length > 0 && (
-          <div className="mt-4 border-t border-border pt-4">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-sm font-medium">Thêm nhanh</span>
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Tìm…" className="max-w-40 py-1" aria-label="Tìm món đã ăn" />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {recent.map((f) => (
-                <button
-                  key={f.name}
-                  type="button"
-                  onClick={() => addRow({ ...f, source: "manual", confidence: null })}
-                  className="rounded-full border border-border px-3 py-1 text-xs hover:border-accent hover:text-accent"
-                >
-                  {f.name} <span className="text-muted">· {fmtKcal(f.kcal)}</span>
-                </button>
-              ))}
-              {recent.length === 0 && <span className="text-xs text-muted">Không có món phù hợp.</span>}
-            </div>
-          </div>
-        )}
+        {rows.length > 0 && <p className="mt-2 text-xs text-muted">Đổi khẩu phần hoặc số gram sẽ tự tính lại calo và chất theo tỉ lệ.</p>}
       </Card>
+
+      {!aiEnabled && photoCard}
 
       <Card className="space-y-4">
         <div>
@@ -445,10 +680,29 @@ export function MealEditor({ mode, mealId, initial, existingPhotos = [], recentF
         </Field>
       </Card>
 
+      {zeroAsk && (
+        <div role="alertdialog" aria-label="Món chưa có calo" className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm">
+          <p className="flex gap-2">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-danger" />
+            <span>
+              Món <strong>{zeroNames.join(", ")}</strong> chưa có calo - vẫn lưu?
+            </span>
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Button type="button" variant="secondary" onClick={() => save(true)} disabled={busy}>
+              Vẫn lưu
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setZeroAsk(null)}>
+              Để nhập calo
+            </Button>
+          </div>
+        </div>
+      )}
+
       {error && <p className="rounded-xl bg-danger/10 p-3 text-sm text-danger">{error}</p>}
 
       <div className="flex gap-2">
-        <Button type="button" onClick={save} disabled={busy} className="flex-1 sm:flex-none">
+        <Button type="button" onClick={() => save()} disabled={busy} className="flex-1 sm:flex-none">
           {saving && <Loader2 className="size-4 animate-spin" />} {mode === "edit" ? "Lưu thay đổi" : "Lưu bữa ăn"}
         </Button>
         <Button type="button" variant="ghost" onClick={cancel} disabled={busy}>
@@ -464,11 +718,13 @@ function NumInput({
   value,
   onChange,
   onBlur,
+  invalid,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   onBlur?: () => void;
+  invalid?: boolean;
 }) {
   return (
     <label className="block min-w-0">
@@ -481,7 +737,11 @@ function NumInput({
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         aria-label={label}
-        className="w-full rounded-xl border border-border bg-surface px-1.5 py-2 text-right text-sm tabular-nums outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+        aria-invalid={invalid || undefined}
+        className={cn(
+          "w-full rounded-xl border bg-surface px-1.5 py-2 text-right text-sm tabular-nums outline-none focus:border-accent focus:ring-2 focus:ring-accent/20",
+          invalid ? "border-danger" : "border-border",
+        )}
       />
     </label>
   );
