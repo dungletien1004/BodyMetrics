@@ -1,5 +1,7 @@
 // Energy and body math. Pure functions only - no DB access here.
 
+import { kcal } from "./format";
+
 export type Sex = "male" | "female";
 export type Intensity = "light" | "moderate" | "vigorous";
 
@@ -24,7 +26,23 @@ export interface EnergyProfile {
   activityFactor: number;
   dailyDeficit: number;
   proteinPerKg: number;
+  goalWeightKg?: number | null;
 }
+
+/** Everyday movement, not counting logged workouts (those are added per day). */
+export const ACTIVITY_LEVELS = [
+  { value: 1.2, label: "Ít vận động", detail: "Ngồi nhiều, ít đi lại (văn phòng, lái xe)" },
+  { value: 1.3, label: "Vận động nhẹ", detail: "Đi lại khá nhiều, làm việc nhà, đi bộ ngắn" },
+  { value: 1.4, label: "Vận động vừa", detail: "Đứng hoặc đi phần lớn ngày (bán hàng, phục vụ)" },
+  { value: 1.5, label: "Lao động chân tay", detail: "Bê vác, công trường, việc nặng cả ngày" },
+] as const;
+
+/** Weight-loss paces offered to the user, kg per week. */
+export const PACES = [
+  { kgPerWeek: 0.25, label: "Chậm" },
+  { kgPerWeek: 0.5, label: "Vừa" },
+  { kgPerWeek: 0.75, label: "Nhanh" },
+] as const;
 
 export function ageFrom(birthYear: number, now = new Date()): number {
   return now.getFullYear() - birthYear;
@@ -56,8 +74,61 @@ export function intakeTarget(p: EnergyProfile, weightKg: number, exerciseKcalTod
   return Math.max(bmr(p, weightKg), Math.round(target));
 }
 
-export function proteinTarget(p: Pick<EnergyProfile, "proteinPerKg">, weightKg: number): number {
-  return Math.round(p.proteinPerKg * weightKg);
+/** Daily deficit that would lose `kgPerWeek` of fat, kcal/day. */
+export function deficitForPace(kgPerWeek: number): number {
+  return Math.round((kgPerWeek * KCAL_PER_KG_FAT) / 7);
+}
+
+/** Weekly fat loss implied by a daily deficit, kg/week (positive = losing). */
+export function kgPerWeekFromDeficit(dailyDeficit: number): number {
+  return (dailyDeficit * 7) / KCAL_PER_KG_FAT;
+}
+
+/**
+ * Protein, g/day: g/kg x goal weight when a goal is set, else x current weight. Using the goal
+ * keeps the number sane for heavier people (lean mass, not fat, needs the protein).
+ */
+export function proteinTarget(p: Pick<EnergyProfile, "proteinPerKg" | "goalWeightKg">, weightKg: number): number {
+  return Math.round(p.proteinPerKg * (p.goalWeightKg || weightKg));
+}
+
+export interface EnergyPlan {
+  bmr: number;
+  tdee: number; // baseline, no workouts
+  targetKcal: number; // intake target on a day without workouts
+  plannedDeficit: number; // what the profile asks for
+  deficit: number; // what is left after the BMR floor
+  clamped: boolean; // the BMR floor cut the deficit
+  plannedKgPerWeek: number;
+  kgPerWeek: number; // honest rate from `deficit`, positive = losing
+  weeksToGoal: number | null;
+}
+
+/**
+ * The plan on a rest day. The intake target never goes below BMR, so a deficit larger than
+ * TDEE - BMR is cut; the real rate comes from the deficit that is actually left.
+ */
+export function energyPlan(p: EnergyProfile, weightKg: number): EnergyPlan {
+  const tdee = baselineTdee(p, weightKg);
+  const targetKcal = intakeTarget(p, weightKg, 0);
+  const deficit = Math.max(0, tdee - targetKcal);
+  const kgPerWeek = kgPerWeekFromDeficit(deficit);
+  return {
+    bmr: bmr(p, weightKg),
+    tdee,
+    targetKcal,
+    plannedDeficit: p.dailyDeficit,
+    deficit,
+    clamped: deficit < p.dailyDeficit,
+    plannedKgPerWeek: kgPerWeekFromDeficit(p.dailyDeficit),
+    kgPerWeek,
+    weeksToGoal: p.goalWeightKg ? weeksToGoal(weightKg, p.goalWeightKg, -kgPerWeek) : null,
+  };
+}
+
+/** One sentence shown when the BMR floor slows the plan down. */
+export function clampNote(bmrKcal: number): string {
+  return `Ăn dưới mức BMR (${kcal(bmrKcal)} kcal) không được khuyến nghị nên mục tiêu dừng ở mức đó và tốc độ giảm chậm hơn dự định; vận động nhiều hơn (đi bộ, tập luyện) sẽ giúp giảm nhanh hơn.`;
 }
 
 export function kcalFromMacros(proteinG: number, carbG: number, fatG: number): number {
@@ -130,4 +201,9 @@ export function adaptiveTdee(days: DayEnergyRecord[], minDays = 14): AdaptiveTde
 export function weeksToGoal(currentKg: number, goalKg: number, kgPerWeek: number): number | null {
   if (kgPerWeek >= 0 || currentKg <= goalKg) return null;
   return Math.ceil((currentKg - goalKg) / -kgPerWeek);
+}
+
+/** Weekly rate for display: 0.25 -> "0,25", 0.5 -> "0,5", 0.237 -> "0,24". */
+export function rateLabel(kgPerWeek: number): string {
+  return (Math.round(kgPerWeek * 100) / 100).toLocaleString("vi-VN");
 }

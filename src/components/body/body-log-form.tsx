@@ -1,7 +1,7 @@
 "use client";
 
 import { ImagePlus } from "lucide-react";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { addBodyLog, type BodyFormState } from "@/app/(app)/body/actions";
 import { Button, Field, Input } from "@/components/ui";
 import { downscaleImage } from "@/lib/client-image";
@@ -11,9 +11,13 @@ export function BodyLogForm({ today }: { today: string }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [previews, setPreviews] = useState<string[]>([]);
   const [resizing, setResizing] = useState(false);
+  // Set synchronously on submit so a fast double tap can't send twice before `pending` renders.
+  const busy = useRef(false);
 
   // Shrink photos in the browser first so the upload stays under the host's request limit.
   async function submit(form: FormData) {
+    if (busy.current) return;
+    busy.current = true;
     const files = form.getAll("photos").filter((f): f is File => f instanceof File && f.size > 0);
     form.delete("photos");
     setResizing(true);
@@ -22,8 +26,13 @@ export function BodyLogForm({ today }: { today: string }) {
     } finally {
       setResizing(false);
     }
-    action(form);
+    // After the await we are outside the form's transition, so start one for the action.
+    startTransition(() => action(form));
   }
+
+  useEffect(() => {
+    if (!pending) busy.current = false;
+  }, [pending]);
 
   useEffect(() => {
     if (state?.ok) {

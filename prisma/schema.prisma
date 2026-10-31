@@ -61,10 +61,13 @@ model Profile {
   heightCm       Float    @default(170)
   // Multiplier on BMR for everyday movement only; logged workouts are added on top.
   activityFactor Float    @default(1.2)
+  // Legacy: start weight now comes from the first body log; read only as a fallback for old data.
   startWeightKg  Float?
   goalWeightKg   Float?
   dailyDeficit   Int      @default(500)
   proteinPerKg   Float    @default(1.8)
+  // Set when the /onboarding wizard is finished; until then the values above are defaults, not the user's.
+  onboardedAt    DateTime?
   updatedAt      DateTime @updatedAt
 }
 

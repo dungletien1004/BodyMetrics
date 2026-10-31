@@ -29,7 +29,12 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
   ]);
 
   const current = series.latestAvg ?? series.latest;
-  const start = profile.startWeightKg ?? series.firstWeight;
+  // Start weight = first weigh-in; the old profile field only covers accounts with no weigh-ins.
+  const start = series.firstWeight ?? profile.startWeightKg;
+  // For "left to goal" and BMI, an old weigh-in (or the start weight) beats showing nothing.
+  const lastKnown = current ?? series.latestEver ?? start;
+  // Height is a default until onboarding is done, so BMI would be made up.
+  const showBmi = profile.onboardedAt != null && lastKnown != null;
   const hasWeights = series.points.some((p) => p.weight != null);
 
   // Progress photo comparison: defaults to first vs latest.
@@ -40,11 +45,17 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
     <>
       <PageHeader title="Cơ thể" subtitle="Cân nặng, số đo và ảnh tiến trình. Nên cân vào buổi sáng, cùng điều kiện mỗi ngày." />
 
+      {/* Below lg the two columns dissolve (display: contents) so the weigh-in form can go first. */}
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
-        <div className="space-y-4">
+        <div className="contents lg:block lg:space-y-4">
           <Card>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <Stat label="Hiện tại (TB 7 ngày)" value={num(current)} unit="kg" sub={series.latest ? `Lần cân gần nhất ${num(series.latest)} kg` : undefined} />
+              <Stat
+                label="Hiện tại (TB 7 ngày)"
+                value={num(current)}
+                unit="kg"
+                sub={series.latest ? `Lần cân gần nhất ${num(series.latest)} kg` : series.latestEver ? `Lần cân cuối ${num(series.latestEver)} kg (đã lâu)` : undefined}
+              />
               <Stat
                 label="7 ngày qua"
                 value={series.weekChange != null ? signed(series.weekChange, 1) : "–"}
@@ -59,9 +70,9 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
               />
               <Stat
                 label="Còn lại tới mục tiêu"
-                value={current != null && profile.goalWeightKg ? num(Math.max(0, current - profile.goalWeightKg)) : "–"}
+                value={lastKnown != null && profile.goalWeightKg ? num(Math.max(0, lastKnown - profile.goalWeightKg)) : "–"}
                 unit="kg"
-                sub={current != null ? `BMI ${num(bmi(current, profile.heightCm))}` : undefined}
+                sub={showBmi ? `BMI ${num(bmi(lastKnown, profile.heightCm))}` : profile.goalWeightKg ? undefined : "Chưa đặt mục tiêu"}
               />
             </div>
           </Card>
@@ -87,7 +98,7 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
             {hasWeights ? (
               <WeightChart data={series.points} goal={profile.goalWeightKg} />
             ) : (
-              <EmptyState title="Chưa có lần cân nào">Thêm cân nặng ở khung bên cạnh để xem xu hướng.</EmptyState>
+              <EmptyState title="Chưa có lần cân nào">Ghi cân nặng ở mục “Ghi chỉ số” để xem xu hướng.</EmptyState>
             )}
             <p className="mt-2 text-xs text-muted">Chấm xám: từng lần cân. Đường xanh: trung bình 7 ngày, ít bị nhiễu bởi nước và muối.</p>
           </Card>
@@ -126,8 +137,8 @@ export default async function BodyPage({ searchParams }: { searchParams: Promise
           )}
         </div>
 
-        <div className="space-y-4">
-          <Card id="new">
+        <div className="contents lg:block lg:space-y-4">
+          <Card id="new" className="scroll-mt-20 max-lg:order-first">
             <CardTitle>Ghi chỉ số</CardTitle>
             <BodyLogForm today={today} />
           </Card>
